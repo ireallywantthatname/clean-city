@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CleanCity
 
-## Getting Started
+Report overflowing bins, illegal dumping, and missed pickups — SDG 11.6.
 
-First, run the development server:
+Built with Next.js 16, Supabase, Google Gemini AI, and Google Maps.
+
+## Setup
+
+### Prerequisites
+
+- [Bun](https://bun.sh) runtime
+- Supabase project (configured with schema from migrations)
+- Google Gemini API key
+- Google Maps API key
+
+### Environment
+
+Copy `.env.local` and fill in your keys:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+GEMINI_API_KEY=your-gemini-key
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your-maps-key
+INTERNAL_AI_SECRET=random-secret-for-internal-ai-calls
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Database
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Run the migrations in order from the Supabase dashboard or via CLI:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+001_enable_extensions → 002_create_enum_types → 003_create_profiles →
+004_create_reports → 005_create_activities → 006_create_ai_runs →
+007_create_ai_image_cache → 008_create_ai_weekly_insights →
+009_create_functions → 010_create_storage_bucket
+```
 
-## Learn More
+### Install & Run
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+bun install
+bun run dev          # start dev server on http://localhost:3000
+bun run seed         # create demo users
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Demo Accounts
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Role | Email | Password |
+|------|-------|----------|
+| Ops Admin | ops@cleancity.dev | password123 |
+| Crew One | crew1@cleancity.dev | password123 |
+| Crew Two | crew2@cleancity.dev | password123 |
 
-## Deploy on Vercel
+## Architecture
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Auth**: Supabase Auth (email/password) with roles in `profiles` table
+- **Database**: PostgreSQL with PostGIS, RLS policies
+- **Storage**: Supabase Storage (`report-photos` bucket)
+- **AI**: Google Gemini (vision garbage detection, triage, crew briefs, duplicates, resolution notes)
+- **Maps**: Google Maps with monochrome styling
+- **UI**: Tailwind CSS v4, monochrome design system, DM Sans + DM Mono fonts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### API Routes (26 endpoints)
+
+| Group | Routes |
+|-------|--------|
+| Reports | CRUD, assign, complete, triage, status, merge, duplicates, export |
+| Analytics | summary (KPI), hotspots (geohash grid) |
+| Users | list crew users |
+| AI | process-report, process-completion, garbage-check, triage, crew-brief, duplicates, public-note, status, retry-pending, weekly-insights |
+
+## Build
+
+```bash
+bun run build
+```
