@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { resolvePostLoginPath } from "@/lib/callback-url";
 import { LogIn } from "lucide-react";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -29,18 +31,18 @@ export default function LoginPage() {
       return;
     }
 
-    // Fetch role and redirect
+    // Fetch role and redirect (prefer safe callbackUrl when present)
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")
       .single();
 
     setLoading(false);
-    if (profile?.role === "ops") {
-      router.push("/ops");
-    } else {
-      router.push("/crew");
-    }
+    const dest = resolvePostLoginPath(
+      searchParams.get("callbackUrl"),
+      profile?.role,
+    );
+    router.push(dest);
     router.refresh();
   }
 
@@ -131,6 +133,7 @@ export default function LoginPage() {
           </p>
           <div className="space-y-2">
             <button
+              type="button"
               onClick={() => fillDemo("ops")}
               className="w-full text-left border border-border px-3 py-2 text-sm hover:bg-secondary transition-colors"
             >
@@ -140,6 +143,7 @@ export default function LoginPage() {
               </span>
             </button>
             <button
+              type="button"
               onClick={() => fillDemo("crew")}
               className="w-full text-left border border-border px-3 py-2 text-sm hover:bg-secondary transition-colors"
             >
@@ -152,5 +156,19 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <p className="text-sm font-mono text-muted-foreground">Loading…</p>
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -9,7 +9,7 @@ import { getSessionUser } from "@/lib/session";
 import { createReportSchema } from "@/lib/schemas";
 import { encodeGeohash } from "@/lib/geo";
 import { logActivity } from "@/lib/activities";
-import { badRequest, serverError } from "@/lib/errors";
+import { badRequest, serverError, unauthorized } from "@/lib/errors";
 
 export async function POST(request: NextRequest) {
   try {
@@ -77,6 +77,10 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    // Staff listing is not anonymously public
+    const user = await getSessionUser();
+    if (!user) return unauthorized();
+
     const supabase = await getSupabaseRoute();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status");
