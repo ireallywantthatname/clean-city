@@ -191,14 +191,36 @@ export function OpsDashboard({ user }: { user: SessionUser }) {
     if (hotspotsRes.ok) setHotspots((await hotspotsRes.json()).hotspots || []);
   }, []);
 
-  useEffect(() => { fetchReports(); }, [fetchReports]);
-  useEffect(() => { fetchMeta(); }, [fetchMeta]);
-
-  // Poll every 15s
+  // Load on mount + when filters change; schedule via timeout so setState is not sync in the effect body
   useEffect(() => {
-    const interval = setInterval(fetchReports, 15000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    const run = () => {
+      void fetchReports().finally(() => {
+        if (cancelled) return;
+      });
+    };
+    const initial = setTimeout(run, 0);
+    const interval = setInterval(run, 15000);
+    return () => {
+      cancelled = true;
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
   }, [fetchReports]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = () => {
+      void fetchMeta().finally(() => {
+        if (cancelled) return;
+      });
+    };
+    const initial = setTimeout(run, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(initial);
+    };
+  }, [fetchMeta]);
 
   const filteredReports = reports.filter((r) => {
     if (!search) return true;

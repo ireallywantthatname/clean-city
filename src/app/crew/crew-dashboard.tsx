@@ -30,11 +30,21 @@ export function CrewDashboard({ user }: { user: SessionUser }) {
     setLoading(false);
   }, [user.id]);
 
-  useEffect(() => { fetchReports(); }, [fetchReports]);
-
+  // Load on mount + poll; schedule via interval so setState is not sync in the effect body
   useEffect(() => {
-    const interval = setInterval(fetchReports, 15000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    const run = () => {
+      void fetchReports().finally(() => {
+        if (cancelled) return;
+      });
+    };
+    const initial = setTimeout(run, 0);
+    const interval = setInterval(run, 15000);
+    return () => {
+      cancelled = true;
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
   }, [fetchReports]);
 
   const selectedReport = reports.find((r) => r.id === selectedId) || null;

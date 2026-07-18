@@ -23,9 +23,13 @@ export function OpsMap({ reports, hotspots, selectedId, onSelectReport }: OpsMap
   const markersRef = useRef<Map<string, CircleMarker>>(new Map());
   const circlesRef = useRef<Circle[]>([]);
   const onSelectRef = useRef(onSelectReport);
-  onSelectRef.current = onSelectReport;
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
+
+  // Keep latest select handler without reading/writing refs during render
+  useEffect(() => {
+    onSelectRef.current = onSelectReport;
+  }, [onSelectReport]);
 
   // Init Leaflet + OSM tiles (client-only)
   useEffect(() => {
@@ -69,7 +73,8 @@ export function OpsMap({ reports, hotspots, selectedId, onSelectReport }: OpsMap
       cancelled = true;
       mapRef.current?.remove();
       mapRef.current = null;
-      markersRef.current.clear();
+      const markers = markersRef.current;
+      markers.clear();
       circlesRef.current = [];
     };
   }, []);
