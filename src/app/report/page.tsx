@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { reportFormSchema } from "@/lib/schemas";
+import { isValidReportLocation, reportFormSchema } from "@/lib/schemas";
 import { TYPE_CONFIG, type TypeConfig } from "@/lib/ui/status";
 import type { ReportType } from "@/lib/types";
 import { Loader2, Camera, MapPin, Check, ArrowLeft, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
 type Step = "type" | "details" | "review";
+type LocationStatus = "idle" | "loading" | "ok" | "error";
 
 export default function ReportPage() {
   const router = useRouter();
@@ -19,23 +20,52 @@ export default function ReportPage() {
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
+  const [locationError, setLocationError] = useState("");
 
   const form = useForm({
     resolver: zodResolver(reportFormSchema),
     defaultValues: { type: "OVERFLOW" as const, lat: 0, lng: 0, notes: "" },
   });
 
-  // Try to get user's location
+  const lat = form.watch("lat");
+  const lng = form.watch("lng");
+  const hasLocation = isValidReportLocation(lat, lng);
+
   const getLocation = useCallback(() => {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setLocationStatus("error");
+      setLocationError("Geolocation is not supported by this browser.");
+      return;
+    }
+    setLocationStatus("loading");
+    setLocationError("");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        form.setValue("lat", pos.coords.latitude);
-        form.setValue("lng", pos.coords.longitude);
+        form.setValue("lat", pos.coords.latitude, { shouldValidate: true });
+        form.setValue("lng", pos.coords.longitude, { shouldValidate: true });
+        setLocationStatus("ok");
+        setLocationError("");
       },
-      () => { /* silently fail */ },
+      (err) => {
+        setLocationStatus("error");
+        setLocationError(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission denied. Enable location to submit a report."
+            : "Could not get your location. Try again.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 },
     );
   }, [form]);
+
+  // Auto-request geolocation when the user reaches the details step
+  useEffect(() => {
+    if (step !== "details") return;
+    if (locationStatus === "ok" || locationStatus === "loading") return;
+    const t = setTimeout(() => getLocation(), 0);
+    return () => clearTimeout(t);
+  }, [step, locationStatus, getLocation]);
 
   function handleTypeSelect(type: ReportType) {
     setSelectedType(type);
@@ -53,6 +83,10 @@ export default function ReportPage() {
   }
 
   async function handleSubmit() {
+    if (!hasLocation) {
+      toast.error("Location is required before submitting");
+      return;
+    }
     setSubmitting(true);
     try {
       const values = form.getValues();
@@ -64,12 +98,15 @@ export default function ReportPage() {
       if (photo) formData.set("photo", photo);
 
       const res = await fetch("/api/reports", { method: "POST", body: formData });
-      if (!res.ok) throw new Error("Submission failed");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || "Submission failed");
+      }
 
       toast.success("Report submitted");
       router.push("/");
-    } catch {
-      toast.error("Failed to submit report");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to submit report");
     } finally {
       setSubmitting(false);
     }
@@ -103,6 +140,7 @@ export default function ReportPage() {
                 return (
                   <button
                     key={key}
+                    type="button"
                     onClick={() => handleTypeSelect(key)}
                     className="w-full flex items-center gap-4 p-4 border border-border hover:border-foreground transition-colors text-left"
                   >
@@ -121,7 +159,7 @@ export default function ReportPage() {
         {/* Step 2: Details */}
         {step === "details" && typeConfig && (
           <div>
-            <button onClick={() => setStep("type")} className="flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground mb-6">
+            <button type="button" onClick={() => setStep("type")} className="flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground mb-6">
               <ArrowLeft className="w-3 h-3" /> Back
             </button>
 
@@ -139,6 +177,7 @@ export default function ReportPage() {
                 <div className="relative border border-border">
                   <img src={photoPreview} alt="Preview" className="w-full h-48 object-cover" />
                   <button
+                    type="button"
                     onClick={() => { setPhoto(null); setPhotoPreview(null); }}
                     className="absolute top-2 right-2 bg-background border border-border px-2 py-1 text-xs hover:bg-secondary"
                   >
@@ -167,21 +206,44 @@ export default function ReportPage() {
               />
             </div>
 
-            {/* Location */}
-            <div className="mb-6">
+            {/* Location — required */}
+            <div className="mb-6 space-y-2">
               <button
                 type="button"
                 onClick={getLocation}
-                className="flex items-center gap-2 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors border border-border px-3 py-2 w-full justify-center"
+                disabled={locationStatus === "loading"}
+                className="flex items-center gap-2 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors border border-border px-3 py-2 w-full justify-center disabled:opacity-50"
               >
-                <MapPin className="w-3 h-3" />
-                {form.watch("lat") !== 0 ? "Location captured" : "Use current location"}
+                {locationStatus === "loading" ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <MapPin className="w-3 h-3" />
+                )}
+                {hasLocation
+                  ? "Location captured"
+                  : locationStatus === "loading"
+                    ? "Getting location…"
+                    : "Use current location"}
               </button>
+              {hasLocation && (
+                <p className="text-xs font-mono text-muted-foreground text-center">
+                  {lat.toFixed(4)}, {lng.toFixed(4)}
+                </p>
+              )}
+              {locationError && (
+                <p className="text-xs font-mono text-destructive text-center">{locationError}</p>
+              )}
+              {!hasLocation && locationStatus !== "loading" && (
+                <p className="text-xs font-mono text-muted-foreground text-center">
+                  Location is required to continue.
+                </p>
+              )}
             </div>
 
             <button
+              type="button"
               onClick={() => setStep("review")}
-              disabled={!photo}
+              disabled={!photo || !hasLocation}
               className="w-full bg-foreground text-background px-4 py-3 font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-30 flex items-center justify-center gap-2"
             >
               Review
@@ -193,7 +255,7 @@ export default function ReportPage() {
         {/* Step 3: Review */}
         {step === "review" && typeConfig && (
           <div>
-            <button onClick={() => setStep("details")} className="flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground mb-6">
+            <button type="button" onClick={() => setStep("details")} className="flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground mb-6">
               <ArrowLeft className="w-3 h-3" /> Back
             </button>
 
@@ -218,14 +280,15 @@ export default function ReportPage() {
               <div className="flex justify-between border-b border-border pb-2">
                 <span className="text-xs font-mono text-muted-foreground">Location</span>
                 <span className="text-sm font-mono">
-                  {form.watch("lat") !== 0 ? `${form.watch("lat").toFixed(4)}, ${form.watch("lng").toFixed(4)}` : "Not set"}
+                  {hasLocation ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : "Not set"}
                 </span>
               </div>
             </div>
 
             <button
+              type="button"
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={submitting || !hasLocation || !photo}
               className="w-full bg-foreground text-background px-4 py-3 font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {submitting ? (

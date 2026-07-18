@@ -77,14 +77,36 @@ export function computeSlaDueAt(
 }
 
 // ---------------------------------------------------------------------------
+// Location validation (reject unset / null-island 0,0)
+// ---------------------------------------------------------------------------
+/**
+ * True when lat/lng are finite, in-range, and not the default null-island (0,0).
+ * Used by report create validation and the citizen report UI.
+ */
+export function isValidReportLocation(lat: number, lng: number): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  // Default form / missing geolocation lands on null island — reject.
+  if (lat === 0 && lng === 0) return false;
+  return true;
+}
+
+const locationRefine = {
+  message: "A real location is required (coordinates cannot be missing or 0,0)",
+  path: ["lat"] as (string | number)[],
+};
+
+// ---------------------------------------------------------------------------
 // Validation schemas
 // ---------------------------------------------------------------------------
-export const createReportSchema = z.object({
-  type: reportTypeEnum,
-  lat: z.coerce.number().min(-90).max(90),
-  lng: z.coerce.number().min(-180).max(180),
-  notes: z.string().optional().default(""),
-});
+export const createReportSchema = z
+  .object({
+    type: reportTypeEnum,
+    lat: z.coerce.number().min(-90).max(90),
+    lng: z.coerce.number().min(-180).max(180),
+    notes: z.string().optional().default(""),
+  })
+  .refine((d) => isValidReportLocation(d.lat, d.lng), locationRefine);
 
 export const assignReportSchema = z.object({
   assignedToUserId: z.string().min(1, "User ID is required"),
@@ -109,12 +131,14 @@ export const mergeReportSchema = z.object({
   targetReportId: z.string().min(1, "Target report ID is required"),
 });
 
-export const reportFormSchema = z.object({
-  type: reportTypeEnum,
-  lat: z.number().min(-90, "Invalid latitude").max(90, "Invalid latitude"),
-  lng: z.number().min(-180, "Invalid longitude").max(180, "Invalid longitude"),
-  notes: z.string().default(""),
-});
+export const reportFormSchema = z
+  .object({
+    type: reportTypeEnum,
+    lat: z.number().min(-90, "Invalid latitude").max(90, "Invalid latitude"),
+    lng: z.number().min(-180, "Invalid longitude").max(180, "Invalid longitude"),
+    notes: z.string().default(""),
+  })
+  .refine((d) => isValidReportLocation(d.lat, d.lng), locationRefine);
 
 export type CreateReportInput = z.infer<typeof createReportSchema>;
 export type AssignReportInput = z.infer<typeof assignReportSchema>;
