@@ -2,12 +2,18 @@
  * OpenAI-compatible AI client — server-side only.
  *
  * Works with DeepSeek, OpenAI, and any /chat/completions-compatible API.
+ * Defaults target DeepSeek V4 Pro (vision-capable):
+ *   https://api-docs.deepseek.com/quick_start/pricing/
+ *
  * Env:
  *   OPENAI_API_KEY or DEEPSEEK_API_KEY
  *   OPENAI_BASE_URL  (default https://api.deepseek.com)
- *   OPENAI_MODEL / OPENAI_VISION_MODEL  (default deepseek-chat)
+ *   OPENAI_MODEL / OPENAI_VISION_MODEL  (default deepseek-v4-pro)
  */
 import OpenAI from "openai";
+
+/** DeepSeek V4 Pro — text + vision, OpenAI-compatible chat completions. */
+const DEFAULT_MODEL = "deepseek-v4-pro";
 
 function getApiKey(): string {
   const key =
@@ -34,7 +40,7 @@ export function getTextModel(): string {
     process.env.OPENAI_MODEL?.trim() ||
     process.env.OPENAI_MODEL_TEXT?.trim() ||
     process.env.DEEPSEEK_MODEL?.trim() ||
-    "deepseek-chat"
+    DEFAULT_MODEL
   );
 }
 
@@ -48,7 +54,18 @@ export function getVisionModel(): string {
 
 /** Provider label stored in ai_runs / cache (not a hard-coded vendor). */
 export function getAiProvider(): string {
-  return process.env.AI_PROVIDER?.trim() || "openai";
+  return process.env.AI_PROVIDER?.trim() || "deepseek";
+}
+
+/**
+ * DeepSeek V4 thinking is enabled by default; disable it for structured JSON
+ * so temperature applies and latency/cost stay predictable.
+ * @see https://api-docs.deepseek.com/guides/thinking_mode
+ */
+function deepseekJsonExtras(): Record<string, unknown> {
+  const base = getBaseUrl().toLowerCase();
+  if (!base.includes("deepseek")) return {};
+  return { thinking: { type: "disabled" } };
 }
 
 export function isAutomationOn(): boolean {
@@ -161,7 +178,8 @@ export async function aiText(opts: AiTextOptions): Promise<AiResult> {
           { role: "system", content: opts.systemInstruction },
           { role: "user", content: opts.userPrompt },
         ],
-      }),
+        ...deepseekJsonExtras(),
+      } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming),
       getTimeoutMs(),
       "aiText",
     );
@@ -172,8 +190,8 @@ export async function aiText(opts: AiTextOptions): Promise<AiResult> {
 }
 
 /**
- * Multimodal call. If the provider rejects images (e.g. DeepSeek text-only),
- * falls back to a text-only prompt so the pipeline still runs.
+ * Multimodal call (image + text). Uses OPENAI_VISION_MODEL / OPENAI_MODEL
+ * (default deepseek-v4-pro). Falls back to text-only if the provider rejects images.
  */
 export async function aiVision(opts: AiVisionOptions): Promise<AiResult> {
   const client = getClient();
@@ -200,7 +218,8 @@ export async function aiVision(opts: AiVisionOptions): Promise<AiResult> {
             ],
           },
         ],
-      }),
+        ...deepseekJsonExtras(),
+      } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming),
       getTimeoutMs(),
       "aiVision",
     );
@@ -229,7 +248,8 @@ export async function aiVision(opts: AiVisionOptions): Promise<AiResult> {
             { role: "system", content: opts.systemInstruction },
             { role: "user", content: fallbackPrompt },
           ],
-        }),
+          ...deepseekJsonExtras(),
+        } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming),
         getTimeoutMs(),
         "aiVisionFallback",
       );

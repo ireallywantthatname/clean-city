@@ -22,15 +22,17 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key   # optional for local; falls back to anon key
 INTERNAL_AI_SECRET=random-secret-for-internal-ai-calls
 
-# OpenAI-compatible AI (DeepSeek example)
+# OpenAI-compatible AI — DeepSeek V4 Pro (text + vision) by default
+# https://api-docs.deepseek.com/quick_start/pricing/
 DEEPSEEK_API_KEY=sk-...               # or OPENAI_API_KEY=...
 OPENAI_BASE_URL=https://api.deepseek.com
-OPENAI_MODEL=deepseek-chat
-# OPENAI_VISION_MODEL=gpt-4o          # optional; for providers with vision
+OPENAI_MODEL=deepseek-v4-pro
+OPENAI_VISION_MODEL=deepseek-v4-pro
 AI_PROVIDER=deepseek                  # label stored in ai_runs
 ```
 
 Any OpenAI-compatible base URL works (OpenAI, DeepSeek, local vLLM, etc.).
+For cheaper text-only traffic you can set `OPENAI_MODEL=deepseek-v4-flash` while keeping Pro for vision.
 
 ### Database
 
