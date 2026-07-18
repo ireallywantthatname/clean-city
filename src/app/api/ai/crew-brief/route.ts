@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseRoute } from "@/lib/supabase/server";
 import { requireAnyRole } from "@/lib/session";
-import { geminiTextJson, isAiEnabled } from "@/lib/ai/geminiClient";
+import { aiTextJson, getAiProvider } from "@/lib/ai/openaiClient";
 import { logAiRun } from "@/lib/ai/ledger";
 import { checkUserRateLimit } from "@/lib/ai/rate-limit";
 import { CREW_BRIEF_SYSTEM, buildCrewBriefUser, CREW_BRIEF_PROMPT_VERSION } from "@/lib/ai/prompts";
@@ -27,13 +27,11 @@ export async function POST(request: NextRequest) {
     const { data: report } = await supabase.from("reports").select("*").eq("id", reportId).single();
     if (!report) return notFound("Report not found");
 
-    if (!isAiEnabled()) return serverError("AI is disabled");
-
     const aiData = (report.ai as Record<string, unknown>) || {};
     const gd = aiData["garbageDetector"] as Record<string, unknown> | undefined;
 
     const startTime = Date.now();
-    const { data, model } = await geminiTextJson({
+    const { data, model } = await aiTextJson({
       systemInstruction: CREW_BRIEF_SYSTEM,
       userPrompt: buildCrewBriefUser({
         reportType: report.type,
@@ -52,13 +50,21 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
     const existingAi = report.ai || {};
     await supabase.from("reports").update({
-      ai: { ...existingAi, crewBrief: { ...data, model, promptVersion: CREW_BRIEF_PROMPT_VERSION, createdAt: now } },
+      ai: {
+        ...existingAi,
+        crewBrief: {
+          ...data,
+          model,
+          promptVersion: CREW_BRIEF_PROMPT_VERSION,
+          createdAt: now,
+        },
+      },
     }).eq("id", reportId);
 
     logAiRun({
       action: "crew_brief_manual", reportId, userId: user.id,
       model, promptVersion: CREW_BRIEF_PROMPT_VERSION,
-      durationMs: Date.now() - startTime, status: "success", provider: "gemini",
+      durationMs: Date.now() - startTime, status: "success", provider: getAiProvider(),
     }).catch(() => {});
 
     return NextResponse.json(data);

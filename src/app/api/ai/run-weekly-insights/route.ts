@@ -1,10 +1,10 @@
 /**
- * POST /api/ai/run-weekly-insights — generate weekly analytics insights via Gemini
+ * POST /api/ai/run-weekly-insights — generate weekly analytics insights
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseRoute } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/session";
-import { geminiText, isAiEnabled } from "@/lib/ai/geminiClient";
+import { aiText } from "@/lib/ai/openaiClient";
 import { checkUserRateLimit } from "@/lib/ai/rate-limit";
 import { serverError } from "@/lib/errors";
 
@@ -14,11 +14,9 @@ export async function POST(request: NextRequest) {
 
     const rl = checkUserRateLimit(user.id);
     if (!rl.allowed) return NextResponse.json({ title: "Rate Limited", status: 429 }, { status: 429 });
-    if (!isAiEnabled()) return serverError("AI is disabled");
 
     const supabase = await getSupabaseRoute();
 
-    // Aggregate last 7 days
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     const { data: reports, error: reportsErr } = await supabase
@@ -32,13 +30,13 @@ export async function POST(request: NextRequest) {
       .select("*", { count: "exact", head: true })
       .gte("created_at", since);
 
-    // Count by type
     const typeCounts: Record<string, number> = {};
-    (reports || []).forEach((r) => { typeCounts[r.type] = (typeCounts[r.type] || 0) + 1; });
+    (reports || []).forEach((r) => {
+      typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
+    });
 
-    // Count open
     const openReports = (reports || []).filter((r) =>
-      ["NEW", "TRIAGED", "ASSIGNED", "IN_PROGRESS", "BLOCKED"].includes(r.status)
+      ["NEW", "TRIAGED", "ASSIGNED", "IN_PROGRESS", "BLOCKED"].includes(r.status),
     );
 
     const summaryText = `
@@ -49,7 +47,7 @@ Weekly CleanCity Report Summary:
 - Top notes themes: ${(reports || []).slice(0, 20).map((r) => r.notes).filter(Boolean).join(" | ")}
 `.trim();
 
-    const result = await geminiText({
+    const result = await aiText({
       systemInstruction: `You are a municipal data analyst for CleanCity. Analyze the weekly report data and provide:
 1. A 2-3 sentence executive summary
 2. Top 3 issues as JSON array [{title, count, trend}]
@@ -66,7 +64,12 @@ Output valid JSON: { "summary": string, "top_issues": [{title, count, trend}], "
     try {
       parsed = JSON.parse(result.content);
     } catch {
-      parsed = { summary: result.content, top_issues: [], recommendations: [], risk_areas: [] };
+      parsed = {
+        summary: result.content,
+        top_issues: [],
+        recommendations: [],
+        risk_areas: [],
+      };
     }
 
     const now = new Date();

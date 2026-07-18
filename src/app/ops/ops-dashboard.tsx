@@ -520,7 +520,7 @@ export function OpsDashboard({ user }: { user: SessionUser }) {
                   {/* Manual AI trigger buttons */}
                   <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
                     <button onClick={async () => {
-                      await fetch("/api/ai/garbage-check-gemini", {
+                      await fetch("/api/ai/garbage-check", {
                         method: "POST", headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ reportId: selectedReport.id }),
                       });

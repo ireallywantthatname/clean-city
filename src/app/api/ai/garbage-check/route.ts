@@ -1,5 +1,5 @@
 /**
- * POST /api/ai/garbage-check-gemini — manually trigger garbage detection
+ * POST /api/ai/garbage-check — manually trigger garbage detection / full report AI
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/lib/session";
@@ -15,7 +15,6 @@ export async function POST(request: NextRequest) {
     if (!reportId) return badRequest("reportId is required");
 
     if (force) {
-      // Clear AI cache for this report
       const supabase = await getSupabaseRoute();
       const { data: report } = await supabase.from("reports").select("ai").eq("id", reportId).single();
       if (!report) return notFound("Report not found");
@@ -30,7 +29,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof Response) throw err;
-    console.error("POST /api/ai/garbage-check-gemini:", err);
+    console.error("POST /api/ai/garbage-check:", err);
     return serverError();
   }
 }

@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseRoute } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/session";
-import { geminiTextJson, isAiEnabled } from "@/lib/ai/geminiClient";
+import { aiTextJson, getAiProvider } from "@/lib/ai/openaiClient";
 import { logAiRun } from "@/lib/ai/ledger";
 import { checkUserRateLimit } from "@/lib/ai/rate-limit";
 import { PUBLIC_NOTE_SYSTEM, buildPublicNoteUser, PUBLIC_NOTE_PROMPT_VERSION } from "@/lib/ai/prompts";
@@ -24,29 +24,40 @@ export async function POST(request: NextRequest) {
     const supabase = await getSupabaseRoute();
     const { data: report } = await supabase.from("reports").select("*").eq("id", reportId).single();
     if (!report) return notFound("Report not found");
-    if (!isAiEnabled()) return serverError("AI is disabled");
 
     const startTime = Date.now();
-    const { data, model } = await geminiTextJson({
+    const { data, model } = await aiTextJson({
       systemInstruction: PUBLIC_NOTE_SYSTEM,
       userPrompt: buildPublicNoteUser({
-        reportType: report.type, notes: report.notes || "",
-        completionNotes: report.completion_notes || undefined, status: report.status,
+        reportType: report.type,
+        notes: report.notes || "",
+        completionNotes: report.completion_notes || undefined,
+        status: report.status,
       }),
-      temperature: 0.3, maxOutputTokens: 512,
+      temperature: 0.3,
+      maxOutputTokens: 512,
       validate: (raw) => aiPublicNoteResultSchema.safeParse(raw),
     });
 
     const now = new Date().toISOString();
     const existingAi = report.ai || {};
     await supabase.from("reports").update({
-      ai: { ...existingAi, publicNote: { ...data, model, promptVersion: PUBLIC_NOTE_PROMPT_VERSION, createdAt: now, createdByUserId: user.id } },
+      ai: {
+        ...existingAi,
+        publicNote: {
+          ...data,
+          model,
+          promptVersion: PUBLIC_NOTE_PROMPT_VERSION,
+          createdAt: now,
+          createdByUserId: user.id,
+        },
+      },
     }).eq("id", reportId);
 
     logAiRun({
       action: "public_note", reportId, userId: user.id,
       model, promptVersion: PUBLIC_NOTE_PROMPT_VERSION,
-      durationMs: Date.now() - startTime, status: "success", provider: "gemini",
+      durationMs: Date.now() - startTime, status: "success", provider: getAiProvider(),
     }).catch(() => {});
 
     return NextResponse.json(data);

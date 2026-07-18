@@ -1,5 +1,5 @@
 /**
- * Zod schemas for all AI response validation — Gemini only.
+ * Zod schemas for all AI response validation.
  */
 import { z } from "zod/v4";
 
@@ -151,5 +151,7 @@ export const aiRunLogSchema = z.object({
 });
 export type AiRunLog = z.infer<typeof aiRunLogSchema>;
 
-export const garbageDetectorCacheSchema = garbageDetectorDocSchema.extend({ provider: z.literal("gemini") });
+export const garbageDetectorCacheSchema = garbageDetectorDocSchema.extend({
+  provider: z.string().default("openai"),
+});
 export type GarbageDetectorCacheDoc = z.infer<typeof garbageDetectorCacheSchema>;

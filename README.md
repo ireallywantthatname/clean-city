@@ -2,7 +2,7 @@
 
 Report overflowing bins, illegal dumping, and missed pickups — SDG 11.6.
 
-Built with Next.js 16, Supabase, Google Gemini AI, and Google Maps.
+Built with Next.js 16, Supabase, OpenAI-compatible AI, and OpenStreetMap.
 
 ## Setup
 
@@ -10,8 +10,7 @@ Built with Next.js 16, Supabase, Google Gemini AI, and Google Maps.
 
 - [Bun](https://bun.sh) runtime
 - Supabase project (configured with schema from migrations)
-- Google Gemini API key
-- Google Maps API key
+- OpenAI-compatible API key (e.g. [DeepSeek](https://api-docs.deepseek.com/))
 
 ### Environment
 
@@ -21,11 +20,17 @@ Create `.env.local` (see values from Supabase Dashboard → Project Settings →
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key   # optional for local; falls back to anon key
-GEMINI_API_KEY=your-gemini-key                    # optional; set AI_ENABLED=false without it
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your-maps-key     # optional for map tiles
 INTERNAL_AI_SECRET=random-secret-for-internal-ai-calls
-AI_ENABLED=false
+
+# OpenAI-compatible AI (DeepSeek example)
+DEEPSEEK_API_KEY=sk-...               # or OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_MODEL=deepseek-chat
+# OPENAI_VISION_MODEL=gpt-4o          # optional; for providers with vision
+AI_PROVIDER=deepseek                  # label stored in ai_runs
 ```
+
+Any OpenAI-compatible base URL works (OpenAI, DeepSeek, local vLLM, etc.).
 
 ### Database
 
@@ -60,8 +65,8 @@ Demo users are also created by migration `008_seed_demo_users`.
 - **Auth**: Supabase Auth (email/password) with roles in `profiles` table
 - **Database**: PostgreSQL with PostGIS, RLS policies
 - **Storage**: Supabase Storage (`report-photos` bucket)
-- **AI**: Google Gemini (vision garbage detection, triage, crew briefs, duplicates, resolution notes)
-- **Maps**: Google Maps with monochrome styling
+- **AI**: OpenAI-compatible chat API (garbage detection, triage, crew briefs, duplicates, resolution notes). Text-only providers fall back when vision is unsupported.
+- **Maps**: OpenStreetMap tiles via Leaflet (Carto dark basemap)
 - **UI**: Tailwind CSS v4, monochrome design system, DM Sans + DM Mono fonts
 
 ### API Routes (26 endpoints)

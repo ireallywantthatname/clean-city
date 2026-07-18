@@ -4,19 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Report, HotspotCell } from "@/lib/types";
 import { STATUS_CONFIG } from "@/lib/ui/status";
 import { Loader } from "lucide-react";
-
-// Dynamically load Google Maps
-function loadGoogleMapsScript(apiKey: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (window.google?.maps) { resolve(); return; }
-    const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&v=weekly`;
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Google Maps"));
-    document.head.appendChild(script);
-  });
-}
+import type { Map as LeafletMap, CircleMarker, Circle } from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 interface OpsMapProps {
   reports: Report[];
@@ -25,100 +14,147 @@ interface OpsMapProps {
   onSelectReport: (id: string) => void;
 }
 
+const DEFAULT_CENTER: [number, number] = [6.5244, 3.3792]; // Lagos
+const DEFAULT_ZOOM = 12;
+
 export function OpsMap({ reports, hotspots, selectedId, onSelectReport }: OpsMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<Map<string, google.maps.marker.AdvancedMarkerElement>>(new Map());
+  const mapRef = useRef<LeafletMap | null>(null);
+  const markersRef = useRef<Map<string, CircleMarker>>(new Map());
+  const circlesRef = useRef<Circle[]>([]);
+  const onSelectRef = useRef(onSelectReport);
+  onSelectRef.current = onSelectReport;
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
 
-  // Load maps
+  // Init Leaflet + OSM tiles (client-only)
   useEffect(() => {
-    const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!key) { setError("Maps API key not configured"); return; }
-    loadGoogleMapsScript(key)
-      .then(() => setReady(true))
-      .catch((e) => setError(e.message));
+    let cancelled = false;
+
+    async function init() {
+      try {
+        const L = (await import("leaflet")).default;
+
+        if (cancelled || !containerRef.current || mapRef.current) return;
+
+        const map = L.map(containerRef.current, {
+          center: DEFAULT_CENTER,
+          zoom: DEFAULT_ZOOM,
+          zoomControl: true,
+          attributionControl: true,
+        });
+
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: "abcd",
+          maxZoom: 20,
+        }).addTo(map);
+
+        mapRef.current = map;
+        setReady(true);
+
+        // Fix layout if container was zero-sized on mount
+        requestAnimationFrame(() => map.invalidateSize());
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load map");
+        }
+      }
+    }
+
+    init();
+
+    return () => {
+      cancelled = true;
+      mapRef.current?.remove();
+      mapRef.current = null;
+      markersRef.current.clear();
+      circlesRef.current = [];
+    };
   }, []);
 
-  // Init map
-  useEffect(() => {
-    if (!ready || !containerRef.current || mapRef.current) return;
-
-    mapRef.current = new google.maps.Map(containerRef.current, {
-      center: { lat: 6.5244, lng: 3.3792 }, // Lagos
-      zoom: 12,
-      mapId: "CLEANCITY_MAP",
-      styles: [
-        { featureType: "all", elementType: "labels.text.fill", stylers: [{ color: "#a0a0a0" }] },
-        { featureType: "all", elementType: "labels.text.stroke", stylers: [{ visibility: "off" }] },
-        { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#333" }] },
-        { featureType: "road", elementType: "geometry", stylers: [{ color: "#222" }] },
-        { featureType: "water", elementType: "geometry", stylers: [{ color: "#111" }] },
-        { featureType: "poi", elementType: "geometry", stylers: [{ color: "#1a1a1a" }] },
-        { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#0d0d0d" }] },
-      ],
-      disableDefaultUI: true,
-      zoomControl: true,
-    });
-  }, [ready]);
-
-  // Update markers
+  // Markers + hotspots
   useEffect(() => {
     if (!mapRef.current || !ready) return;
+    let cancelled = false;
 
-    // Clear old markers
-    markersRef.current.forEach((m) => (m.map = null));
-    markersRef.current.clear();
+    (async () => {
+      const L = (await import("leaflet")).default;
+      if (cancelled || !mapRef.current) return;
 
-    // Monochrome dot pin
-    const pinSvg = (opacity: number) => `
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="8" y="8" width="8" height="8" fill="white" fill-opacity="${opacity}" />
-        <rect x="10" y="16" width="4" height="6" fill="white" fill-opacity="${opacity / 2}" />
-      </svg>`;
+      // Clear previous layers
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current.clear();
+      circlesRef.current.forEach((c) => c.remove());
+      circlesRef.current = [];
 
-    for (const report of reports) {
-      const cfg = STATUS_CONFIG[report.status];
-      const isDone = report.status === "DONE" || report.status === "REJECTED";
-      const opacity = isDone ? 0.3 : 1;
+      for (const report of reports) {
+        const isDone = report.status === "DONE" || report.status === "REJECTED";
+        const isSelected = report.id === selectedId;
+        const cfg = STATUS_CONFIG[report.status];
 
-      const pin = new google.maps.marker.PinElement({
-        glyph: "",
-        background: isDone ? "#555" : "#fafafa",
-        borderColor: isDone ? "#333" : "#fafafa",
-        scale: isDone ? 0.8 : 1,
-      });
+        const marker = L.circleMarker([report.lat, report.lng], {
+          radius: isSelected ? 10 : isDone ? 6 : 8,
+          color: isSelected ? "#fff" : isDone ? "#555" : "#fafafa",
+          weight: isSelected ? 2 : 1,
+          fillColor: isDone ? "#555" : "#fafafa",
+          fillOpacity: isDone ? 0.35 : isSelected ? 1 : 0.9,
+          opacity: isDone ? 0.5 : 1,
+        });
 
-      const marker = new google.maps.marker.AdvancedMarkerElement({
-        map: mapRef.current,
-        position: { lat: report.lat, lng: report.lng },
-        title: `${report.type} - ${report.status}`,
-        content: pin.element,
-      });
+        marker.bindTooltip(
+          `${report.type} · ${cfg?.label || report.status}`,
+          { direction: "top", opacity: 0.9 },
+        );
+        marker.on("click", () => onSelectRef.current(report.id));
+        marker.addTo(mapRef.current!);
+        markersRef.current.set(report.id, marker);
+      }
 
-      marker.addListener("click", () => onSelectReport(report.id));
-      markersRef.current.set(report.id, marker);
-    }
+      for (const h of hotspots) {
+        const alpha = Math.min(0.15 + h.count * 0.01, 0.4);
+        const circle = L.circle([h.centerLat, h.centerLng], {
+          radius: 300 + h.count * 30,
+          color: "#888",
+          weight: 1,
+          fillColor: "#ffffff",
+          fillOpacity: alpha,
+          opacity: 0.5,
+          interactive: false,
+        });
+        circle.addTo(mapRef.current!);
+        circlesRef.current.push(circle);
+      }
 
-    // Hotspot circles
-    for (const h of hotspots) {
-      const alpha = Math.min(0.15 + h.count * 0.01, 0.4);
-      new google.maps.Circle({
-        map: mapRef.current,
-        center: { lat: h.centerLat, lng: h.centerLng },
-        radius: 300 + h.count * 30,
-        fillColor: "#ffffff",
-        fillOpacity: alpha,
-        strokeColor: "#555",
-        strokeWeight: 1,
-        strokeOpacity: 0.5,
-      });
-    }
-  }, [reports, hotspots, ready, onSelectReport]);
+      // Fit bounds when we have points
+      if (reports.length > 0) {
+        const bounds = L.latLngBounds(reports.map((r) => [r.lat, r.lng] as [number, number]));
+        mapRef.current.fitBounds(bounds.pad(0.2), { maxZoom: 15 });
+      }
+    })();
 
-  if (error) return <div className="flex items-center justify-center h-full text-xs font-mono text-muted-foreground">{error}</div>;
-  if (!ready) return <div className="flex items-center justify-center h-full"><Loader className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
+    return () => {
+      cancelled = true;
+    };
+  }, [reports, hotspots, ready, selectedId]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full text-xs font-mono text-muted-foreground">
+        {error}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-full h-full min-h-[240px]">
+      {!ready && (
+        <div className="absolute inset-0 z-[500] flex items-center justify-center bg-background/60">
+          <Loader className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      )}
+      <div ref={containerRef} className="w-full h-full" />
+    </div>
+  );
 }

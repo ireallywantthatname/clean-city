@@ -3,6 +3,7 @@
  * Every AI invocation recorded in `ai_runs` for traceability.
  */
 import { getSupabaseRoute } from "@/lib/supabase/server";
+import { getAiProvider } from "@/lib/ai/openaiClient";
 
 export interface AiRunEntry {
   action: string;
@@ -13,7 +14,8 @@ export interface AiRunEntry {
   durationMs: number;
   status: "success" | "error" | "timeout" | "cached";
   error?: string;
-  provider: "gemini";
+  /** Defaults to configured AI_PROVIDER / openai */
+  provider?: string;
 }
 
 export async function logAiRun(entry: AiRunEntry): Promise<string | null> {
@@ -28,7 +30,7 @@ export async function logAiRun(entry: AiRunEntry): Promise<string | null> {
       duration_ms: entry.durationMs,
       status: entry.status,
       error: entry.error || null,
-      provider: entry.provider,
+      provider: entry.provider || getAiProvider(),
       created_at: new Date().toISOString(),
     }).select("id").single();
 

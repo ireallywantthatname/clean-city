@@ -60,8 +60,17 @@ export async function setCachedResult(
   data: Record<string, unknown>,
 ): Promise<void> {
   const supabase = await getSupabaseRoute();
+  const provider =
+    (typeof data.provider === "string" && data.provider) ||
+    process.env.AI_PROVIDER?.trim() ||
+    "openai";
   await supabase.from("ai_image_cache").upsert(
-    { image_hash: imageHash, ...data, provider: "gemini", created_at: new Date().toISOString() },
+    {
+      image_hash: imageHash,
+      ...data,
+      provider,
+      created_at: new Date().toISOString(),
+    },
     { onConflict: "image_hash" },
   );
 }

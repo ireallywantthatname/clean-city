@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseRoute } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/session";
-import { geminiTextJson, isAiEnabled } from "@/lib/ai/geminiClient";
+import { aiTextJson, getAiProvider } from "@/lib/ai/openaiClient";
 import { logAiRun } from "@/lib/ai/ledger";
 import { checkUserRateLimit } from "@/lib/ai/rate-limit";
 import { haversineDistance } from "@/lib/geo";
@@ -27,8 +27,6 @@ export async function POST(request: NextRequest) {
     const supabase = await getSupabaseRoute();
     const { data: report } = await supabase.from("reports").select("*").eq("id", reportId).single();
     if (!report) return notFound("Report not found");
-
-    if (!isAiEnabled()) return serverError("AI is disabled");
 
     const sourceCreatedAt = new Date(report.created_at);
     const cutoff = new Date(sourceCreatedAt.getTime() - 168 * 60 * 60 * 1000).toISOString();
@@ -60,10 +58,17 @@ export async function POST(request: NextRequest) {
     }
 
     const startTime = Date.now();
-    const { data, model } = await geminiTextJson({
+    const { data, model } = await aiTextJson({
       systemInstruction: DUPLICATES_SYSTEM,
       userPrompt: buildDuplicatesUser({
-        target: { id: reportId, type: report.type, notes: report.notes || "", lat: report.lat, lng: report.lng, createdAt: sourceCreatedAt.toISOString() },
+        target: {
+          id: reportId,
+          type: report.type,
+          notes: report.notes || "",
+          lat: report.lat,
+          lng: report.lng,
+          createdAt: sourceCreatedAt.toISOString(),
+        },
         candidates,
       }),
       temperature: 0.2,
@@ -77,13 +82,21 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
     const existingAi = report.ai || {};
     await supabase.from("reports").update({
-      ai: { ...existingAi, duplicates: { ...data, model, promptVersion: DUPLICATES_PROMPT_VERSION, createdAt: now } },
+      ai: {
+        ...existingAi,
+        duplicates: {
+          ...data,
+          model,
+          promptVersion: DUPLICATES_PROMPT_VERSION,
+          createdAt: now,
+        },
+      },
     }).eq("id", reportId);
 
     logAiRun({
       action: "duplicates_manual", reportId, userId: user.id,
       model, promptVersion: DUPLICATES_PROMPT_VERSION,
-      durationMs: Date.now() - startTime, status: "success", provider: "gemini",
+      durationMs: Date.now() - startTime, status: "success", provider: getAiProvider(),
     }).catch(() => {});
 
     return NextResponse.json(data);

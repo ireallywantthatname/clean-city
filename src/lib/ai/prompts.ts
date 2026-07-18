@@ -1,5 +1,5 @@
 /**
- * Unified AI prompt templates — Gemini only.
+ * Unified AI prompt templates (OpenAI-compatible providers).
  * Versioned for auditability.
  */
 import { sanitizeForAI, coarsenLocation, INJECTION_DEFENSE } from "@/lib/ai/sanitize";

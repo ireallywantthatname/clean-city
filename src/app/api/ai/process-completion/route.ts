@@ -3,7 +3,6 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { processCompletion } from "@/lib/ai/pipeline";
-import { isAiEnabled } from "@/lib/ai/geminiClient";
 import { serverError } from "@/lib/errors";
 
 export async function POST(request: NextRequest) {
@@ -15,10 +14,6 @@ export async function POST(request: NextRequest) {
   try {
     const { reportId } = await request.json();
     if (!reportId) return NextResponse.json({ title: "Bad Request", status: 400 }, { status: 400 });
-
-    if (!isAiEnabled()) {
-      return NextResponse.json({ skipped: true, reason: "AI is disabled" });
-    }
 
     const result = await processCompletion(reportId);
     return NextResponse.json(result);
