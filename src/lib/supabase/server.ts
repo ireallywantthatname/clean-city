@@ -28,12 +28,21 @@ export async function getSupabase() {
   });
 }
 
+/**
+ * Elevated/server client for route handlers.
+ * Prefers SUPABASE_SERVICE_ROLE_KEY (bypasses RLS). Falls back to the anon key
+ * so local dev works before the service role key is configured — relies on
+ * RLS policies allowing the necessary reads/writes.
+ */
 export async function getSupabaseRoute() {
-  const { url } = getEnv();
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceRoleKey) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+  const { url, anonKey } = getEnv();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const key =
+    serviceRoleKey && !serviceRoleKey.includes("NeedToGetThis")
+      ? serviceRoleKey
+      : anonKey;
   const cookieStore = await cookies();
-  return createServerClient(url, serviceRoleKey, {
+  return createServerClient(url, key, {
     cookies: {
       getAll() { return cookieStore.getAll(); },
       setAll(cookiesToSet: CookieToSet[]) {

@@ -15,26 +15,26 @@ Built with Next.js 16, Supabase, Google Gemini AI, and Google Maps.
 
 ### Environment
 
-Copy `.env.local` and fill in your keys:
+Create `.env.local` (see values from Supabase Dashboard → Project Settings → API):
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-GEMINI_API_KEY=your-gemini-key
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your-maps-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key   # optional for local; falls back to anon key
+GEMINI_API_KEY=your-gemini-key                    # optional; set AI_ENABLED=false without it
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your-maps-key     # optional for map tiles
 INTERNAL_AI_SECRET=random-secret-for-internal-ai-calls
+AI_ENABLED=false
 ```
 
 ### Database
 
-Run the migrations in order from the Supabase dashboard or via CLI:
+SQL migrations live in `supabase/migrations/`. Apply them via the Supabase SQL editor, CLI, or MCP:
 
 ```
 001_enable_extensions → 002_create_enum_types → 003_create_profiles →
-004_create_reports → 005_create_activities → 006_create_ai_runs →
-007_create_ai_image_cache → 008_create_ai_weekly_insights →
-009_create_functions → 010_create_storage_bucket
+004_create_reports → 005_create_activities → 006_create_ai_tables →
+007_create_storage_bucket → 008_seed_demo_users
 ```
 
 ### Install & Run
@@ -42,8 +42,10 @@ Run the migrations in order from the Supabase dashboard or via CLI:
 ```bash
 bun install
 bun run dev          # start dev server on http://localhost:3000
-bun run seed         # create demo users
+bun run seed         # optional: create demo users via Admin API (needs service role)
 ```
+
+Demo users are also created by migration `008_seed_demo_users`.
 
 ### Demo Accounts
 

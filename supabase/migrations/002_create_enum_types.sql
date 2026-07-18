@@ -1,0 +1,19 @@
+DO $$ BEGIN
+  CREATE TYPE public.report_type AS ENUM ('OVERFLOW', 'ILLEGAL_DUMP', 'MISSED_PICKUP');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.report_status AS ENUM ('NEW', 'TRIAGED', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'REJECTED');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.priority_level AS ENUM ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.activity_type AS ENUM ('CREATED', 'TRIAGED', 'ASSIGNED', 'UNASSIGNED', 'STATUS_CHANGE', 'COMPLETED', 'MERGED', 'COMMENT');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE public.ai_status AS ENUM ('PENDING', 'PROCESSING', 'COMPLETE', 'FAILED');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
