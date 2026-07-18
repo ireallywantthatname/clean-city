@@ -59,10 +59,12 @@ export default function ReportPage() {
     );
   }, [form]);
 
-  // Auto-request geolocation when the user reaches the details step
+  // Auto-request geolocation once when entering details (idle only).
+  // On error/denied stay on "error" so we do not re-prompt in a loop;
+  // the location button remains available for a manual retry.
   useEffect(() => {
     if (step !== "details") return;
-    if (locationStatus === "ok" || locationStatus === "loading") return;
+    if (locationStatus !== "idle") return;
     const t = setTimeout(() => getLocation(), 0);
     return () => clearTimeout(t);
   }, [step, locationStatus, getLocation]);
