@@ -46,16 +46,6 @@ function LoginForm() {
     router.refresh();
   }
 
-  function fillDemo(role: "ops" | "crew") {
-    if (role === "ops") {
-      setEmail("ops@cleancity.dev");
-      setPassword("password123");
-    } else {
-      setEmail("crew1@cleancity.dev");
-      setPassword("password123");
-    }
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-full max-w-sm p-8 border border-border">
@@ -82,6 +72,7 @@ function LoginForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              autoComplete="username"
               className="w-full bg-background border border-border px-3 py-2 text-sm font-mono focus:outline-none focus:border-foreground transition-colors"
               placeholder="you@example.com"
             />
@@ -100,6 +91,7 @@ function LoginForm() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              autoComplete="current-password"
               className="w-full bg-background border border-border px-3 py-2 text-sm font-mono focus:outline-none focus:border-foreground transition-colors"
               placeholder="••••••••"
             />
@@ -126,34 +118,6 @@ function LoginForm() {
             )}
           </button>
         </form>
-
-        <div className="mt-8 pt-6 border-t border-border">
-          <p className="text-xs font-mono text-muted-foreground mb-3 uppercase tracking-wider">
-            Demo accounts
-          </p>
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={() => fillDemo("ops")}
-              className="w-full text-left border border-border px-3 py-2 text-sm hover:bg-secondary transition-colors"
-            >
-              <span className="font-bold">Operations</span>
-              <span className="text-muted-foreground ml-2 font-mono text-xs">
-                ops@cleancity.dev
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => fillDemo("crew")}
-              className="w-full text-left border border-border px-3 py-2 text-sm hover:bg-secondary transition-colors"
-            >
-              <span className="font-bold">Crew</span>
-              <span className="text-muted-foreground ml-2 font-mono text-xs">
-                crew1@cleancity.dev
-              </span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

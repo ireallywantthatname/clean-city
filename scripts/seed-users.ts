@@ -1,11 +1,17 @@
 /**
- * Seed demo users via Supabase Admin API.
+ * Seed one staff account per app role via Supabase Admin API.
  *
  * Usage: bun run scripts/seed-users.ts
  *
  * Requires SUPABASE_SERVICE_ROLE_KEY in .env.local
+ * Credentials live in src/lib/seed-accounts.ts — never surface them in the UI.
  */
 import { createClient } from "@supabase/supabase-js";
+import {
+  ALL_USER_ROLES,
+  SEED_ACCOUNTS,
+  rolesMissingSeedAccounts,
+} from "../src/lib/seed-accounts";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -15,33 +21,28 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
+const missing = rolesMissingSeedAccounts();
+if (missing.length > 0) {
+  console.error(
+    `Seed list is incomplete — missing roles: ${missing.join(", ")}. ` +
+      `Expected coverage for: ${ALL_USER_ROLES.join(", ")}`,
+  );
+  process.exit(1);
+}
+
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-interface DemoUser {
-  email: string;
-  password: string;
-  name: string;
-  role: "ops" | "crew";
-}
-
-const DEMO_USERS: DemoUser[] = [
-  { email: "ops@cleancity.dev", password: "password123", name: "Ops Admin", role: "ops" },
-  { email: "crew1@cleancity.dev", password: "password123", name: "Crew One", role: "crew" },
-  { email: "crew2@cleancity.dev", password: "password123", name: "Crew Two", role: "crew" },
-];
-
 async function seed() {
-  console.log("Seeding demo users…\n");
+  console.log("Seeding staff accounts (one per role)…\n");
 
-  for (const user of DEMO_USERS) {
-    // Check if user already exists
+  for (const user of SEED_ACCOUNTS) {
     const { data: existing } = await supabase.auth.admin.listUsers();
     const alreadyExists = existing?.users?.some((u) => u.email === user.email);
 
     if (alreadyExists) {
-      console.log(`  SKIP: ${user.email} (already exists)`);
+      console.log(`  SKIP: ${user.email} (${user.role}) — already exists`);
       continue;
     }
 
@@ -59,7 +60,7 @@ async function seed() {
     }
   }
 
-  console.log("\nDone.");
+  console.log("\nDone. Accounts are not shown in the login UI.");
 }
 
 seed().catch(console.error);

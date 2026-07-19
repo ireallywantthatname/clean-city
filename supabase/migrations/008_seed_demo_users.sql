@@ -70,6 +70,6 @@ BEGIN
 END;
 $$;
 
+-- One seed account per app role (ops, crew). Not shown in the login UI.
 SELECT public.seed_demo_user('ops@cleancity.dev', 'password123', 'Ops Admin', 'ops');
-SELECT public.seed_demo_user('crew1@cleancity.dev', 'password123', 'Crew One', 'crew');
-SELECT public.seed_demo_user('crew2@cleancity.dev', 'password123', 'Crew Two', 'crew');
+SELECT public.seed_demo_user('crew@cleancity.dev', 'password123', 'Crew Lead', 'crew');

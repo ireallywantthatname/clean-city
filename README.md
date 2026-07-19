@@ -49,18 +49,17 @@ SQL migrations live in `supabase/migrations/`. Apply them via the Supabase SQL e
 ```bash
 bun install
 bun run dev          # start dev server on http://localhost:3000
-bun run seed         # optional: create demo users via Admin API (needs service role)
+bun run seed         # optional: create one staff user per role via Admin API (needs service role)
 ```
 
-Demo users are also created by migration `008_seed_demo_users`.
-
-### Demo Accounts
+Seed staff accounts (one per role: `ops`, `crew`) are created by migrations
+`008_seed_demo_users` / `010_ensure_seed_accounts_per_role` and by `bun run seed`.
+They are **not** shown in the login UI — use credentials from `src/lib/seed-accounts.ts` in local dev only.
 
 | Role | Email | Password |
 |------|-------|----------|
-| Ops Admin | ops@cleancity.dev | password123 |
-| Crew One | crew1@cleancity.dev | password123 |
-| Crew Two | crew2@cleancity.dev | password123 |
+| ops | ops@cleancity.dev | password123 |
+| crew | crew@cleancity.dev | password123 |
 
 ## Architecture
 
