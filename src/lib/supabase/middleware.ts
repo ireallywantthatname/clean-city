@@ -1,5 +1,5 @@
 /**
- * Supabase middleware client — for Next.js middleware.ts.
+ * Supabase session client — used by the Next.js proxy.
  */
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
