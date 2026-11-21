@@ -6,7 +6,7 @@ Built with Next.js 16, Convex, an OpenAI-compatible vision and text API, and Ope
 
 ## Screenshot
 
-![CleanCity operations dashboard](public/screenshot.png)
+![CleanCity operations dashboard](public/screenshots.png)
 
 ## Setup
 
