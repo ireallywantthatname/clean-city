@@ -1,26 +1,19 @@
-/**
- * Image cache utilities — server-side only.
- * Cache AI results by image sha256 hash in Supabase `ai_image_cache`.
- */
 import { createHash } from "crypto";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 
-/**
- * Download file bytes from Supabase Storage by object path.
- */
 export async function downloadImage(
-  storagePath: string,
+  photoUrl: string,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
-  const supabase = await getSupabaseRoute();
-
-  const { data, error } = await supabase.storage
-    .from("report-photos")
-    .download(storagePath);
-
-  if (error || !data) throw new Error(`Storage file not found: ${storagePath}`);
-
-  const buffer = Buffer.from(await data.arrayBuffer());
-  const mimeType = data.type || "image/jpeg";
+  if (!photoUrl) {
+    throw new Error("Photo URL is empty");
+  }
+  const res = await fetch(photoUrl);
+  if (!res.ok) {
+    throw new Error(`Storage file download failed: ${res.status}`);
+  }
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const mimeType = res.headers.get("content-type") || "image/jpeg";
   return { buffer, mimeType };
 }
 
@@ -33,44 +26,48 @@ export function resolvePhotoPath(
   data: Record<string, unknown>,
 ): string {
   if (data.beforePhotoPath) return data.beforePhotoPath as string;
-  const url = data.beforePhotoUrl as string;
-  if (url) {
-    const match = url.match(/reports%2F[^?&]+/);
-    if (match) return decodeURIComponent(match[0]);
-    const match2 = url.match(/reports\/[^?&]+/);
-    if (match2) return match2[0];
-  }
+  if (data.before_photo_path) return data.before_photo_path as string;
   return `reports/${reportId}/before.jpg`;
 }
 
 export async function getCachedResult(
   imageHash: string,
 ): Promise<Record<string, unknown> | null> {
-  const supabase = await getSupabaseRoute();
-  const { data } = await supabase
-    .from("ai_image_cache")
-    .select("*")
-    .eq("image_hash", imageHash)
-    .single();
-  return data || null;
+  const convex = getConvexClient();
+  const data = await convex.query(api.ai.getCache, { imageHash });
+  return data ? (data as Record<string, unknown>) : null;
 }
 
 export async function setCachedResult(
   imageHash: string,
   data: Record<string, unknown>,
 ): Promise<void> {
-  const supabase = await getSupabaseRoute();
+  const convex = getConvexClient();
   const provider =
     (typeof data.provider === "string" && data.provider) ||
     process.env.AI_PROVIDER?.trim() ||
     "openai";
-  await supabase.from("ai_image_cache").upsert(
-    {
-      image_hash: imageHash,
-      ...data,
-      provider,
-      created_at: new Date().toISOString(),
-    },
-    { onConflict: "image_hash" },
-  );
+  const label = data.label as "GARBAGE" | "NOT_GARBAGE" | "UNCERTAIN" | undefined;
+
+  await convex.mutation(api.ai.setCache, {
+    imageHash,
+    label,
+    confidence:
+      typeof data.confidence === "number" ? data.confidence : undefined,
+    reason: typeof data.reason === "string" ? data.reason : undefined,
+    garbageTypes: Array.isArray(data.garbage_types)
+      ? (data.garbage_types as string[])
+      : undefined,
+    needsHumanReview:
+      typeof data.needs_human_review === "boolean"
+        ? data.needs_human_review
+        : undefined,
+    model: typeof data.model === "string" ? data.model : undefined,
+    promptVersion:
+      typeof data.prompt_version === "string"
+        ? data.prompt_version
+        : undefined,
+    provider,
+    createdAt: new Date().toISOString(),
+  });
 }

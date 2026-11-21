@@ -1,37 +1,43 @@
-# CleanCity - Project Context
+# CleanCity project context
 
 ## Overview
-CleanCity is a modern web application designed to help citizens report municipal waste issues such as overflowing bins, illegal dumping, and missed pickups (aligning with UN SDG 11.6). 
 
-It features tailored interfaces for different user roles, utilizing AI to automate report triage, deduplication, and routing.
+CleanCity is a web application for reporting municipal waste problems including overflowing bins, illegal dumping, and missed pickups under UN SDG 11.6. Citizens submit geotagged reports with photos, operations staff triage and dispatch tasks, and field crews resolve assigned jobs.
 
-## Tech Stack
-- **Framework:** Next.js 16 (App Router) with React 19
-- **Runtime:** Bun
-- **Styling:** Tailwind CSS v4, monochrome design system, shadcn/radix-ui components
-- **Map Integration:** OpenStreetMap via Leaflet (Carto dark basemap)
-- **Backend & Database:** Supabase (PostgreSQL with PostGIS for geospatial data, Auth, Storage)
-- **AI Integration:** OpenAI-compatible API (defaults to DeepSeek V4 Pro text and vision models)
+## Tech stack
 
-## Architecture & Features
-The application is structured around specific user roles and workflows:
+- **Framework.** Next.js 16 App Router with React 19.
+- **Runtime.** Bun.
+- **Styling.** Tailwind CSS v4 with a monochrome theme and Radix UI primitives.
+- **Maps.** OpenStreetMap tiles rendered with Leaflet and a Carto dark basemap.
+- **Backend and database.** Convex tables, queries, mutations, and file storage.
+- **AI integration.** OpenAI-compatible API defaulting to DeepSeek V4 Pro for text and vision tasks.
 
-### Key Areas
-- **Public Reporting (`/report`):** Interface for citizens to submit issues with location data and photos.
-- **Operations Dashboard (`/ops`):** Triage, analytics, hotspot mapping, and dispatching for operations staff.
-- **Crew Dashboard (`/crew`):** Task list and resolution interface for field workers.
-- **API Engine (`/api`):** 26 specialized endpoints covering reports, analytics, user management, and AI processing.
+## Architecture
 
-### AI Capabilities
-AI is deeply integrated into the workflow to minimize manual operations tasks:
-- Image validation (verifying garbage presence via vision models).
-- Automated triage and severity assessment.
-- Duplicate report detection based on context and location.
-- Generation of crew briefs and public-facing resolution notes.
+### Application routes
 
-### Data Model Highlights
-The database relies on Supabase and is structured via migrations (`supabase/migrations/`). Key tables include:
-- `profiles`: Role-based access control (e.g., ops, crew).
-- `reports`: Core entity storing issue details, status, and geography (PostGIS).
-- `activities`: Audit logs and activity tracking.
-- `ai_tables`: Storage for AI job logs, outputs, and embeddings.
+- **Public reporting at `/report`.** Three-step form for citizens to select an issue type, attach a photo, capture GPS coordinates, and submit a report.
+- **Operations dashboard at `/ops`.** Queue, KPI strip, status and priority filters, map view, manual and automated triage, crew assignment, and CSV export.
+- **Crew dashboard at `/crew`.** Assigned job list where field workers start jobs, block or unblock work, upload completion photos, and mark jobs done.
+- **API routes under `/api`.** Endpoints for authentication, report management, analytics aggregation, user lookup, and AI processing.
+
+### AI pipeline
+
+- **Garbage detection.** Vision model checks whether the uploaded photo shows waste and caches results by SHA-256 image hash in `ai_image_cache`.
+- **Vision triage.** Vision model classifies hazards, volume, recommended crew type, PPE, and priority.
+- **Crew briefing.** Text model generates a short summary, checklist, and safety warnings for field crews.
+- **Duplicate detection.** Text model ranks recent reports within 500 meters by similarity.
+- **Resolution notes.** Text model drafts a public resolution note and internal summary when a crew completes a job.
+
+### Convex data model
+
+The schema in `convex/schema.ts` defines seven tables:
+
+- `users` stores staff accounts and roles for `ops` and `crew`.
+- `sessions` stores active authentication tokens and expiration timestamps.
+- `reports` stores waste reports, coordinates, geohashes, storage IDs for photos, assignment fields, SLA timestamps, and nested AI results.
+- `activities` stores the audit log for report creation, triage, assignment, status transitions, merges, and completion.
+- `ai_runs` records model invocations, latency, status, and errors.
+- `ai_image_cache` caches vision garbage detection outputs by SHA-256 hash.
+- `ai_weekly_insights` stores generated weekly summaries, top issues, risk areas, and recommendations.

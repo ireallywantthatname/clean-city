@@ -1,8 +1,6 @@
-/**
- * POST /api/reports/[id]/merge — merge a report into another
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireRole } from "@/lib/session";
 import { mergeReportSchema } from "@/lib/schemas";
 import { logActivity } from "@/lib/activities";
@@ -24,27 +22,37 @@ export async function POST(
       return badRequest("Cannot merge a report into itself");
     }
 
-    const supabase = await getSupabaseRoute();
+    const convex = getConvexClient();
 
-    // Fetch source and target
-    const { data: source } = await supabase.from("reports").select("id, status").eq("id", id).single();
+    const source = await convex.query(api.reports.getById, { id });
     if (!source) return notFound("Source report not found");
 
-    const { data: target } = await supabase.from("reports").select("id").eq("id", parsed.data.targetReportId).single();
+    const target = await convex.query(api.reports.getById, {
+      id: parsed.data.targetReportId,
+    });
     if (!target) return notFound("Target report not found");
 
-    // Merge: set source as REJECTED + linked to target
-    const { error: updateErr } = await supabase
-      .from("reports")
-      .update({
-        status: "REJECTED",
-        merged_into_report_id: parsed.data.targetReportId,
-      })
-      .eq("id", id);
-    if (updateErr) return serverError(updateErr.message);
+    const updated = await convex.mutation(api.reports.update, {
+      id,
+      status: "REJECTED",
+      mergedIntoReportId: parsed.data.targetReportId,
+    });
+    if (!updated) return serverError("Failed to merge report");
 
-    await logActivity(id, "MERGED", `Merged into report ${parsed.data.targetReportId}`, user.id, user.name);
-    await logActivity(parsed.data.targetReportId, "MERGED", `Merged report ${id} into this`, user.id, user.name);
+    await logActivity(
+      id,
+      "MERGED",
+      `Merged into report ${parsed.data.targetReportId}`,
+      user.id,
+      user.name,
+    );
+    await logActivity(
+      parsed.data.targetReportId,
+      "MERGED",
+      `Merged report ${id} into this`,
+      user.id,
+      user.name,
+    );
 
     return NextResponse.json({ success: true });
   } catch (err) {

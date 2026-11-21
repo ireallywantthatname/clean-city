@@ -1,8 +1,6 @@
-/**
- * GET /api/reports/[id] — get a single report with activities
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { getSessionUser } from "@/lib/session";
 import { notFound, serverError } from "@/lib/errors";
 
@@ -13,16 +11,20 @@ export async function GET(
   try {
     const { id } = await params;
     const user = await getSessionUser();
-    if (!user) return NextResponse.json({ title: "Unauthorized", status: 401 }, { status: 401 });
+    if (!user) {
+      return NextResponse.json(
+        { title: "Unauthorized", status: 401 },
+        { status: 401 },
+      );
+    }
 
-    const supabase = await getSupabaseRoute();
-    const { data: report, error } = await supabase
-      .from("reports")
-      .select("*, activities(*)")
-      .eq("id", id)
-      .single();
+    const convex = getConvexClient();
+    const report = await convex.query(api.reports.getById, {
+      id,
+      includeActivities: true,
+    });
 
-    if (error || !report) return notFound("Report not found");
+    if (!report) return notFound("Report not found");
 
     return NextResponse.json(report);
   } catch (err) {

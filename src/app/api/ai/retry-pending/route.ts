@@ -1,10 +1,7 @@
-/**
- * POST /api/ai/retry-pending — retry failed/pending AI for one or all reports
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireRole } from "@/lib/session";
-import { processReport } from "@/lib/ai/pipeline";
 import { badRequest, serverError } from "@/lib/errors";
 
 export async function POST(request: NextRequest) {
@@ -14,42 +11,38 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const reportId = body.reportId as string | undefined;
 
-    const supabase = await getSupabaseRoute();
+    const convex = getConvexClient();
 
     if (reportId) {
-      // Retry single report
-      const { data: report } = await supabase
-        .from("reports")
-        .select("ai")
-        .eq("id", reportId)
-        .single();
+      const report = await convex.query(api.reports.getById, { id: reportId });
       if (!report) return badRequest("Report not found");
 
-      const ai = report.ai || {};
-      const status = ai.status || "COMPLETE";
+      const status = report.ai?.status || "COMPLETE";
       if (status === "COMPLETE") {
-        return NextResponse.json({ message: "AI already complete for this report", skipped: true });
+        return NextResponse.json({
+          message: "AI already complete for this report",
+          skipped: true,
+        });
       }
 
-      // Fire-and-forget
       const aiSecret = process.env.INTERNAL_AI_SECRET || "";
       fetch(`${request.nextUrl.origin}/api/ai/process-report`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-internal-ai-secret": aiSecret },
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-ai-secret": aiSecret,
+        },
         body: JSON.stringify({ reportId }),
       }).catch(() => {});
 
       return NextResponse.json({ message: "Retry triggered", count: 1 });
     }
 
-    // Retry all pending/failed
-    const { data: pending } = await supabase
-      .from("reports")
-      .select("id")
-      .or("ai->>status.eq.PENDING,ai->>status.eq.FAILED")
-      .limit(50);
+    const pending = await convex.query(api.reports.listPendingAi, {
+      limit: 50,
+    });
 
-    if (!pending?.length) {
+    if (!pending.length) {
       return NextResponse.json({ message: "No pending reports", count: 0 });
     }
 
@@ -57,12 +50,18 @@ export async function POST(request: NextRequest) {
     for (const r of pending) {
       fetch(`${request.nextUrl.origin}/api/ai/process-report`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-internal-ai-secret": aiSecret },
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-ai-secret": aiSecret,
+        },
         body: JSON.stringify({ reportId: r.id }),
       }).catch(() => {});
     }
 
-    return NextResponse.json({ message: "Retries triggered", count: pending.length });
+    return NextResponse.json({
+      message: "Retries triggered",
+      count: pending.length,
+    });
   } catch (err) {
     if (err instanceof Response) throw err;
     console.error("POST /api/ai/retry-pending:", err);

@@ -1,10 +1,8 @@
-/**
- * POST /api/ai/garbage-check — manually trigger garbage detection / full report AI
- */
 import { NextRequest, NextResponse } from "next/server";
+import { api } from "../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireRole } from "@/lib/session";
 import { processReport } from "@/lib/ai/pipeline";
-import { getSupabaseRoute } from "@/lib/supabase/server";
 import { badRequest, notFound, serverError } from "@/lib/errors";
 
 export async function POST(request: NextRequest) {
@@ -15,13 +13,14 @@ export async function POST(request: NextRequest) {
     if (!reportId) return badRequest("reportId is required");
 
     if (force) {
-      const supabase = await getSupabaseRoute();
-      const { data: report } = await supabase.from("reports").select("ai").eq("id", reportId).single();
+      const convex = getConvexClient();
+      const report = await convex.query(api.reports.getById, { id: reportId });
       if (!report) return notFound("Report not found");
       if (report.ai?.garbageDetector) {
-        await supabase.from("reports").update({
+        await convex.mutation(api.reports.update, {
+          id: reportId,
           ai: { ...report.ai, garbageDetector: null, status: "PENDING" },
-        }).eq("id", reportId);
+        });
       }
     }
 

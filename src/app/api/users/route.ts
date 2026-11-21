@@ -1,8 +1,6 @@
-/**
- * GET /api/users — list crew users for assignment dropdown
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireRole } from "@/lib/session";
 import { serverError } from "@/lib/errors";
 
@@ -10,19 +8,14 @@ export async function GET(request: NextRequest) {
   try {
     await requireRole("ops");
 
-    const supabase = await getSupabaseRoute();
+    const convex = getConvexClient();
     const { searchParams } = new URL(request.url);
-    const role = searchParams.get("role") || "crew";
+    const roleParam = searchParams.get("role");
+    const role: "ops" | "crew" = roleParam === "ops" ? "ops" : "crew";
 
-    const { data: users, error } = await supabase
-      .from("profiles")
-      .select("id, name, email")
-      .eq("role", role)
-      .order("name");
+    const users = await convex.query(api.users.listByRole, { role });
 
-    if (error) return serverError(error.message);
-
-    return NextResponse.json(users || []);
+    return NextResponse.json(users);
   } catch (err) {
     if (err instanceof Response) throw err;
     console.error("GET /api/users:", err);

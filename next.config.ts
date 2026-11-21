@@ -6,8 +6,11 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "vxvhyfaybtqiwzpjphvv.supabase.co",
-        pathname: "/storage/v1/object/public/**",
+        hostname: "**.convex.cloud",
+      },
+      {
+        protocol: "https",
+        hostname: "**.convex.site",
       },
     ],
   },
@@ -15,4 +18,4 @@ const nextConfig: NextConfig = {
 
 export default nextConfig;
 
-import('@opennextjs/cloudflare').then(m => m.initOpenNextCloudflareForDev());
+import("@opennextjs/cloudflare").then((m) => m.initOpenNextCloudflareForDev());

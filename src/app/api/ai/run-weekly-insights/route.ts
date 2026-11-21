@@ -1,50 +1,55 @@
-/**
- * POST /api/ai/run-weekly-insights — generate weekly analytics insights
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireRole } from "@/lib/session";
 import { aiText } from "@/lib/ai/openaiClient";
 import { checkUserRateLimit } from "@/lib/ai/rate-limit";
 import { serverError } from "@/lib/errors";
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   try {
     const user = await requireRole("ops");
 
     const rl = checkUserRateLimit(user.id);
-    if (!rl.allowed) return NextResponse.json({ title: "Rate Limited", status: 429 }, { status: 429 });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { title: "Rate Limited", status: 429 },
+        { status: 429 },
+      );
+    }
 
-    const supabase = await getSupabaseRoute();
-
+    const convex = getConvexClient();
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: reports, error: reportsErr } = await supabase
-      .from("reports")
-      .select("type, status, priority, notes, created_at")
-      .gte("created_at", since);
-    if (reportsErr) return serverError(reportsErr.message);
-
-    const { count: totalCount } = await supabase
-      .from("reports")
-      .select("*", { count: "exact", head: true })
-      .gte("created_at", since);
-
-    const typeCounts: Record<string, number> = {};
-    (reports || []).forEach((r) => {
-      typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
+    const reports = await convex.query(api.reports.listRecentSince, {
+      since,
+      limit: 500,
     });
 
-    const openReports = (reports || []).filter((r) =>
-      ["NEW", "TRIAGED", "ASSIGNED", "IN_PROGRESS", "BLOCKED"].includes(r.status),
+    const totalCount = reports.length;
+    const typeCounts: Record<string, number> = {};
+    for (const r of reports) {
+      typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
+    }
+
+    const openReports = reports.filter((r) =>
+      ["NEW", "TRIAGED", "ASSIGNED", "IN_PROGRESS", "BLOCKED"].includes(
+        r.status,
+      ),
     );
 
     const summaryText = `
 Weekly CleanCity Report Summary:
-- Total reports: ${totalCount || 0}
+- Total reports: ${totalCount}
 - Open reports: ${openReports.length}
-- By type: ${Object.entries(typeCounts).map(([k, v]) => `${k}: ${v}`).join(", ")}
-- Top notes themes: ${(reports || []).slice(0, 20).map((r) => r.notes).filter(Boolean).join(" | ")}
+- By type: ${Object.entries(typeCounts)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ")}
+- Top notes themes: ${reports
+      .slice(0, 20)
+      .map((r) => r.notes)
+      .filter(Boolean)
+      .join(" | ")}
 `.trim();
 
     const result = await aiText({
@@ -72,18 +77,35 @@ Output valid JSON: { "summary": string, "top_issues": [{title, count, trend}], "
       };
     }
 
+    const rawTopIssues = Array.isArray(parsed.top_issues)
+      ? parsed.top_issues
+      : [];
+    const topIssues = rawTopIssues.map((item) => {
+      const obj = (item || {}) as Record<string, unknown>;
+      return {
+        title: typeof obj.title === "string" ? obj.title : "Issue",
+        count: typeof obj.count === "number" ? obj.count : 0,
+        trend: typeof obj.trend === "string" ? obj.trend : undefined,
+      };
+    });
+
     const now = new Date();
-    await supabase.from("ai_weekly_insights").insert({
-      summary: (parsed.summary as string) || result.content,
-      top_issues: (parsed.top_issues as unknown) || [],
-      recommendations: (parsed.recommendations as string[]) || [],
-      risk_areas: (parsed.risk_areas as string[]) || [],
+    await convex.mutation(api.ai.saveWeeklyInsight, {
+      summary:
+        typeof parsed.summary === "string" ? parsed.summary : result.content,
+      topIssues,
+      recommendations: Array.isArray(parsed.recommendations)
+        ? (parsed.recommendations as string[])
+        : [],
+      riskAreas: Array.isArray(parsed.risk_areas)
+        ? (parsed.risk_areas as string[])
+        : [],
       model: result.model,
-      generated_by: user.id,
-      period_start: since,
-      period_end: now.toISOString(),
-      total_reports: totalCount || 0,
-      created_at: now.toISOString(),
+      generatedBy: user.id,
+      periodStart: since,
+      periodEnd: now.toISOString(),
+      totalReports: totalCount,
+      createdAt: now.toISOString(),
     });
 
     return NextResponse.json({ insight: parsed, model: result.model });

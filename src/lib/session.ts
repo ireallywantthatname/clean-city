@@ -1,42 +1,27 @@
-/**
- * Session helpers — server-side only.
- *
- * Verifies Supabase Auth session + resolves user profile (role) in one shot.
- */
-import { getSupabase } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
+import { api } from "../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import type { SessionUser, UserRole } from "@/lib/types";
 
-/**
- * Get the currently authenticated user with role from profiles table.
- * Returns null if not authenticated.
- */
+export const SESSION_COOKIE_NAME = "cleancity_session";
+
 export async function getSessionUser(): Promise<SessionUser | null> {
-  const supabase = await getSupabase();
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  if (!token) return null;
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-  if (error || !user?.email) return null;
-
-  // Fetch role from profiles table
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, name")
-    .eq("id", user.id)
-    .single();
-
-  return {
-    id: user.id,
-    email: user.email,
-    name: profile?.name || user.email,
-    role: (profile?.role as UserRole) || "crew",
-  };
+  try {
+    const convex = getConvexClient();
+    const user = await convex.query(api.auth.getSession, {
+      token,
+      now: Date.now(),
+    });
+    return user;
+  } catch {
+    return null;
+  }
 }
 
-/**
- * Require any role from the list. Throws 401/403 Response if not authorized.
- */
 export async function requireAnyRole(
   ...roles: UserRole[]
 ): Promise<SessionUser> {
@@ -70,9 +55,6 @@ export async function requireAnyRole(
   return user;
 }
 
-/**
- * Require a specific role.
- */
 export async function requireRole(role: UserRole): Promise<SessionUser> {
   return requireAnyRole(role);
 }

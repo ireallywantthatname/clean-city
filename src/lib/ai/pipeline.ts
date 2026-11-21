@@ -1,13 +1,14 @@
-/**
- * AI Pipeline Orchestrator — server-side only.
- *
- * Runs the full AI pipeline for a report or completion event.
- * Called by /api/ai/process-report and /api/ai/process-completion.
- */
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { haversineDistance } from "@/lib/geo";
 import { aiVisionJson, aiTextJson, getAiProvider } from "@/lib/ai/openaiClient";
-import { downloadImage, sha256, resolvePhotoPath, getCachedResult, setCachedResult } from "@/lib/ai/cache";
+import {
+  downloadImage,
+  sha256,
+  resolvePhotoPath,
+  getCachedResult,
+  setCachedResult,
+} from "@/lib/ai/cache";
 import { logAiRun } from "@/lib/ai/ledger";
 import {
   garbageDetectorResultSchema,
@@ -22,24 +23,27 @@ import {
   type ResolutionNoteResult,
 } from "@/lib/ai/schemas";
 import {
-  GARBAGE_DETECTOR_SYSTEM, GARBAGE_DETECTOR_USER, GARBAGE_DETECTOR_PROMPT_VERSION,
-  VISION_TRIAGE_SYSTEM, buildVisionTriageUser, VISION_TRIAGE_PROMPT_VERSION,
-  CREW_BRIEF_SYSTEM, buildCrewBriefUser, CREW_BRIEF_PROMPT_VERSION,
-  DUPLICATES_SYSTEM, buildDuplicatesUser, DUPLICATES_PROMPT_VERSION,
-  RESOLUTION_NOTE_SYSTEM, buildResolutionNoteUser, RESOLUTION_NOTE_PROMPT_VERSION,
+  GARBAGE_DETECTOR_SYSTEM,
+  GARBAGE_DETECTOR_USER,
+  GARBAGE_DETECTOR_PROMPT_VERSION,
+  VISION_TRIAGE_SYSTEM,
+  buildVisionTriageUser,
+  VISION_TRIAGE_PROMPT_VERSION,
+  CREW_BRIEF_SYSTEM,
+  buildCrewBriefUser,
+  CREW_BRIEF_PROMPT_VERSION,
+  DUPLICATES_SYSTEM,
+  buildDuplicatesUser,
+  DUPLICATES_PROMPT_VERSION,
+  RESOLUTION_NOTE_SYSTEM,
+  buildResolutionNoteUser,
+  RESOLUTION_NOTE_PROMPT_VERSION,
 } from "@/lib/ai/prompts";
-
-function supabase() {
-  return getSupabaseRoute();
-}
 
 function provider() {
   return getAiProvider();
 }
 
-// ---------------------------------------------------------------------------
-// Report creation pipeline
-// ---------------------------------------------------------------------------
 export interface ProcessReportResult {
   garbageDetector: GarbageDetectorResult | null;
   visionTriage: VisionTriageResult | null;
@@ -48,22 +52,26 @@ export interface ProcessReportResult {
   errors: string[];
 }
 
-export async function processReport(reportId: string): Promise<ProcessReportResult> {
-  const db = await supabase();
+export async function processReport(
+  reportId: string,
+): Promise<ProcessReportResult> {
+  const convex = getConvexClient();
 
-  const { data: reportData, error: fetchErr } = await db
-    .from("reports")
-    .select("*")
-    .eq("id", reportId)
-    .single();
-  if (fetchErr || !reportData) throw new Error("Report not found");
+  const reportData = await convex.query(api.reports.getById, { id: reportId });
+  if (!reportData) throw new Error("Report not found");
 
-  await db.from("reports").update({
-    ai: { ...(reportData.ai || {}), status: "PROCESSING" },
-  }).eq("id", reportId);
+  const initialAi = reportData.ai ?? { status: "PENDING" as const };
+  await convex.mutation(api.reports.update, {
+    id: reportId,
+    ai: { ...initialAi, status: "PROCESSING" },
+  });
 
   const result: ProcessReportResult = {
-    garbageDetector: null, visionTriage: null, crewBrief: null, duplicates: null, errors: [],
+    garbageDetector: null,
+    visionTriage: null,
+    crewBrief: null,
+    duplicates: null,
+    errors: [],
   };
 
   let imageBase64: string | null = null;
@@ -72,23 +80,29 @@ export async function processReport(reportId: string): Promise<ProcessReportResu
   let storagePath = "";
 
   try {
-    storagePath = resolvePhotoPath(reportId, reportData);
-    const { buffer, mimeType } = await downloadImage(storagePath);
+    storagePath = resolvePhotoPath(
+      reportId,
+      reportData as unknown as Record<string, unknown>,
+    );
+    const { buffer, mimeType } = await downloadImage(
+      reportData.beforePhotoUrl,
+    );
     imageBase64 = buffer.toString("base64");
     imageMimeType = mimeType;
     imageHash = sha256(buffer);
   } catch (err) {
-    result.errors.push(`Image download failed: ${err instanceof Error ? err.message : String(err)}`);
+    result.errors.push(
+      `Image download failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   const now = new Date().toISOString();
   const aiUpdates: Record<string, unknown> = {};
-  const reportType = (reportData.type as string) || "UNKNOWN";
-  const reportNotes = (reportData.notes as string) || "";
-  const lat = reportData.lat as number;
-  const lng = reportData.lng as number;
+  const reportType = reportData.type || "OVERFLOW";
+  const reportNotes = reportData.notes || "";
+  const lat = reportData.lat;
+  const lng = reportData.lng;
 
-  // 1. Garbage Detection
   if (imageBase64) {
     const startTime = Date.now();
     try {
@@ -103,17 +117,23 @@ export async function processReport(reportId: string): Promise<ProcessReportResu
         };
         aiUpdates["garbageDetector"] = {
           ...result.garbageDetector,
-          model: cached.model,
-          promptVersion: cached.prompt_version,
+          model: (cached.model as string) ?? undefined,
+          promptVersion: (cached.prompt_version as string) ?? undefined,
           createdAt: now,
           imageHash,
           cached: true,
         };
         logAiRun({
-          action: "garbage_detector", reportId, userId: "system",
+          action: "garbage_detector",
+          reportId,
+          userId: "system",
           model: (cached.model as string) || "cached",
-          promptVersion: (cached.prompt_version as string) || GARBAGE_DETECTOR_PROMPT_VERSION,
-          durationMs: Date.now() - startTime, status: "cached", provider: provider(),
+          promptVersion:
+            (cached.prompt_version as string) ||
+            GARBAGE_DETECTOR_PROMPT_VERSION,
+          durationMs: Date.now() - startTime,
+          status: "cached",
+          provider: provider(),
         }).catch(() => {});
       } else {
         const userPrompt = `${GARBAGE_DETECTOR_USER}
@@ -151,23 +171,33 @@ Location: ${lat}, ${lng}`;
           prompt_version: GARBAGE_DETECTOR_PROMPT_VERSION,
         }).catch(() => {});
         logAiRun({
-          action: "garbage_detector", reportId, userId: "system",
-          model, promptVersion: GARBAGE_DETECTOR_PROMPT_VERSION,
-          durationMs: Date.now() - startTime, status: "success", provider: provider(),
+          action: "garbage_detector",
+          reportId,
+          userId: "system",
+          model,
+          promptVersion: GARBAGE_DETECTOR_PROMPT_VERSION,
+          durationMs: Date.now() - startTime,
+          status: "success",
+          provider: provider(),
         }).catch(() => {});
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       result.errors.push(`Garbage detector: ${msg}`);
       logAiRun({
-        action: "garbage_detector", reportId, userId: "system",
-        model: "unknown", promptVersion: GARBAGE_DETECTOR_PROMPT_VERSION,
-        durationMs: Date.now() - startTime, status: "error", error: msg, provider: provider(),
+        action: "garbage_detector",
+        reportId,
+        userId: "system",
+        model: "unknown",
+        promptVersion: GARBAGE_DETECTOR_PROMPT_VERSION,
+        durationMs: Date.now() - startTime,
+        status: "error",
+        error: msg,
+        provider: provider(),
       }).catch(() => {});
     }
   }
 
-  // 2. Vision Triage
   if (imageBase64) {
     const startTime = Date.now();
     try {
@@ -193,22 +223,32 @@ Location: ${lat}, ${lng}`;
         createdAt: now,
       };
       logAiRun({
-        action: "vision_triage", reportId, userId: "system",
-        model, promptVersion: VISION_TRIAGE_PROMPT_VERSION,
-        durationMs: Date.now() - startTime, status: "success", provider: provider(),
+        action: "vision_triage",
+        reportId,
+        userId: "system",
+        model,
+        promptVersion: VISION_TRIAGE_PROMPT_VERSION,
+        durationMs: Date.now() - startTime,
+        status: "success",
+        provider: provider(),
       }).catch(() => {});
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       result.errors.push(`Vision triage: ${msg}`);
       logAiRun({
-        action: "vision_triage", reportId, userId: "system",
-        model: "unknown", promptVersion: VISION_TRIAGE_PROMPT_VERSION,
-        durationMs: Date.now() - startTime, status: "error", error: msg, provider: provider(),
+        action: "vision_triage",
+        reportId,
+        userId: "system",
+        model: "unknown",
+        promptVersion: VISION_TRIAGE_PROMPT_VERSION,
+        durationMs: Date.now() - startTime,
+        status: "error",
+        error: msg,
+        provider: provider(),
       }).catch(() => {});
     }
   }
 
-  // 3. Crew Brief
   {
     const startTime = Date.now();
     try {
@@ -217,8 +257,9 @@ Location: ${lat}, ${lng}`;
         userPrompt: buildCrewBriefUser({
           reportType,
           notes: reportNotes,
-          priority: (result.visionTriage?.priority || (reportData.priority as string) || "MEDIUM"),
-          status: (reportData.status as string) || "NEW",
+          priority:
+            result.visionTriage?.priority || reportData.priority || "MEDIUM",
+          status: reportData.status || "NEW",
           garbageTypes: result.garbageDetector?.garbageTypes,
           hazards: result.visionTriage?.hazards?.filter((h) => h !== "NONE"),
           estimatedVolume: result.visionTriage?.estimatedVolume,
@@ -235,50 +276,63 @@ Location: ${lat}, ${lng}`;
         createdAt: now,
       };
       logAiRun({
-        action: "crew_brief", reportId, userId: "system",
-        model, promptVersion: CREW_BRIEF_PROMPT_VERSION,
-        durationMs: Date.now() - startTime, status: "success", provider: provider(),
+        action: "crew_brief",
+        reportId,
+        userId: "system",
+        model,
+        promptVersion: CREW_BRIEF_PROMPT_VERSION,
+        durationMs: Date.now() - startTime,
+        status: "success",
+        provider: provider(),
       }).catch(() => {});
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       result.errors.push(`Crew brief: ${msg}`);
       logAiRun({
-        action: "crew_brief", reportId, userId: "system",
-        model: "unknown", promptVersion: CREW_BRIEF_PROMPT_VERSION,
-        durationMs: Date.now() - startTime, status: "error", error: msg, provider: provider(),
+        action: "crew_brief",
+        reportId,
+        userId: "system",
+        model: "unknown",
+        promptVersion: CREW_BRIEF_PROMPT_VERSION,
+        durationMs: Date.now() - startTime,
+        status: "error",
+        error: msg,
+        provider: provider(),
       }).catch(() => {});
     }
   }
 
-  // 4. Duplicates
   {
     const startTime = Date.now();
     try {
-      const sourceCreatedAt = new Date(reportData.created_at as string);
-      const cutoff = new Date(sourceCreatedAt.getTime() - 168 * 60 * 60 * 1000);
-      const { data: recentReports } = await db
-        .from("reports")
-        .select("id, type, notes, lat, lng, created_at, status")
-        .gte("created_at", cutoff.toISOString())
-        .order("created_at", { ascending: false })
-        .limit(100);
+      const sourceCreatedAt = new Date(reportData.createdAt);
+      const cutoff = new Date(
+        sourceCreatedAt.getTime() - 168 * 60 * 60 * 1000,
+      );
+      const recentReports = await convex.query(api.reports.listRecentSince, {
+        since: cutoff.toISOString(),
+        limit: 100,
+      });
 
-      const candidates = (recentReports || [])
+      const candidates = recentReports
         .filter((d) => d.id !== reportId)
         .filter((d) => d.status !== "REJECTED")
-        .filter((d) => {
-          return haversineDistance(lat, lng, d.lat as number, d.lng as number) <= 500;
-        })
+        .filter((d) => haversineDistance(lat, lng, d.lat, d.lng) <= 500)
         .map((d) => {
-          const created = new Date(d.created_at as string);
+          const created = new Date(d.createdAt);
           return {
             id: d.id,
-            type: d.type as string,
-            notes: (d.notes as string) || "",
-            distanceMeters: Math.round(haversineDistance(lat, lng, d.lat as number, d.lng as number)),
-            ageHoursApart: Math.round(
-              (Math.abs(sourceCreatedAt.getTime() - created.getTime()) / 3600_000) * 10,
-            ) / 10,
+            type: d.type,
+            notes: d.notes || "",
+            distanceMeters: Math.round(
+              haversineDistance(lat, lng, d.lat, d.lng),
+            ),
+            ageHoursApart:
+              Math.round(
+                (Math.abs(sourceCreatedAt.getTime() - created.getTime()) /
+                  3600_000) *
+                  10,
+              ) / 10,
           };
         })
         .slice(0, 15);
@@ -302,7 +356,9 @@ Location: ${lat}, ${lng}`;
           validate: (raw) => duplicateResultSchema.safeParse(raw),
         });
         const validIds = new Set(candidates.map((c) => c.id));
-        data.rankedCandidates = data.rankedCandidates.filter((c) => validIds.has(c.reportId));
+        data.rankedCandidates = data.rankedCandidates.filter((c) =>
+          validIds.has(c.reportId),
+        );
         result.duplicates = data;
         aiUpdates["duplicates"] = {
           ...data,
@@ -311,9 +367,14 @@ Location: ${lat}, ${lng}`;
           createdAt: now,
         };
         logAiRun({
-          action: "duplicates", reportId, userId: "system",
-          model, promptVersion: DUPLICATES_PROMPT_VERSION,
-          durationMs: Date.now() - startTime, status: "success", provider: provider(),
+          action: "duplicates",
+          reportId,
+          userId: "system",
+          model,
+          promptVersion: DUPLICATES_PROMPT_VERSION,
+          durationMs: Date.now() - startTime,
+          status: "success",
+          provider: provider(),
         }).catch(() => {});
       } else {
         result.duplicates = { rankedCandidates: [] };
@@ -330,60 +391,55 @@ Location: ${lat}, ${lng}`;
     }
   }
 
-  const existingAi = (reportData.ai as Record<string, unknown>) || {};
-  const hasAnyResult = result.garbageDetector || result.visionTriage || result.crewBrief;
+  const existingAi = reportData.ai ?? { status: "PENDING" as const };
+  const hasAnyResult =
+    result.garbageDetector || result.visionTriage || result.crewBrief;
   const finalAi = {
     ...existingAi,
     ...aiUpdates,
-    status: hasAnyResult ? "COMPLETE" : "FAILED",
+    status: (hasAnyResult ? "COMPLETE" : "FAILED") as "COMPLETE" | "FAILED",
     processedAt: now,
     errors: result.errors.length > 0 ? result.errors : undefined,
   };
 
-  await db.from("reports").update({
+  await convex.mutation(api.reports.update, {
+    id: reportId,
     ai: finalAi,
-    before_photo_path: storagePath || undefined,
-  }).eq("id", reportId);
+    beforePhotoPath: storagePath || undefined,
+  });
 
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Completion pipeline
-// ---------------------------------------------------------------------------
 export interface ProcessCompletionResult {
   resolutionNote: ResolutionNoteResult | null;
   errors: string[];
 }
 
-export async function processCompletion(reportId: string): Promise<ProcessCompletionResult> {
-  const db = await supabase();
+export async function processCompletion(
+  reportId: string,
+): Promise<ProcessCompletionResult> {
+  const convex = getConvexClient();
 
-  const { data: reportData, error: fetchErr } = await db
-    .from("reports")
-    .select("*")
-    .eq("id", reportId)
-    .single();
-  if (fetchErr || !reportData) throw new Error("Report not found");
+  const reportData = await convex.query(api.reports.getById, { id: reportId });
+  if (!reportData) throw new Error("Report not found");
 
   const result: ProcessCompletionResult = { resolutionNote: null, errors: [] };
   const startTime = Date.now();
   const now = new Date().toISOString();
 
   try {
-    const aiData = (reportData.ai as Record<string, unknown>) || {};
-    const gd = aiData["garbageDetector"] as Record<string, unknown> | undefined;
-    const garbageTypes = (gd?.garbageTypes as string[]) || [];
+    const garbageTypes = reportData.ai?.garbageDetector?.garbageTypes || [];
 
     const { data, model } = await aiTextJson({
       systemInstruction: RESOLUTION_NOTE_SYSTEM,
       userPrompt: buildResolutionNoteUser({
-        reportType: (reportData.type as string) || "UNKNOWN",
-        notes: (reportData.notes as string) || "",
-        completionNotes: (reportData.completion_notes as string) || "",
-        status: (reportData.status as string) || "DONE",
+        reportType: reportData.type || "OVERFLOW",
+        notes: reportData.notes || "",
+        completionNotes: reportData.completionNotes || "",
+        status: reportData.status || "DONE",
         garbageTypes,
-        priority: reportData.priority as string | undefined,
+        priority: reportData.priority,
       }),
       temperature: 0.3,
       maxOutputTokens: 512,
@@ -392,8 +448,9 @@ export async function processCompletion(reportId: string): Promise<ProcessComple
 
     result.resolutionNote = data;
 
-    const existingAi = (reportData.ai as Record<string, unknown>) || {};
-    await db.from("reports").update({
+    const existingAi = reportData.ai ?? { status: "COMPLETE" as const };
+    await convex.mutation(api.reports.update, {
+      id: reportId,
       ai: {
         ...existingAi,
         resolutionNote: {
@@ -403,20 +460,31 @@ export async function processCompletion(reportId: string): Promise<ProcessComple
           createdAt: now,
         },
       },
-    }).eq("id", reportId);
+    });
 
     logAiRun({
-      action: "resolution_note", reportId, userId: "system",
-      model, promptVersion: RESOLUTION_NOTE_PROMPT_VERSION,
-      durationMs: Date.now() - startTime, status: "success", provider: provider(),
+      action: "resolution_note",
+      reportId,
+      userId: "system",
+      model,
+      promptVersion: RESOLUTION_NOTE_PROMPT_VERSION,
+      durationMs: Date.now() - startTime,
+      status: "success",
+      provider: provider(),
     }).catch(() => {});
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     result.errors.push(`Resolution note: ${msg}`);
     logAiRun({
-      action: "resolution_note", reportId, userId: "system",
-      model: "unknown", promptVersion: RESOLUTION_NOTE_PROMPT_VERSION,
-      durationMs: Date.now() - startTime, status: "error", error: msg, provider: provider(),
+      action: "resolution_note",
+      reportId,
+      userId: "system",
+      model: "unknown",
+      promptVersion: RESOLUTION_NOTE_PROMPT_VERSION,
+      durationMs: Date.now() - startTime,
+      status: "error",
+      error: msg,
+      provider: provider(),
     }).catch(() => {});
   }
 

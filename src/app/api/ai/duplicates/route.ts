@@ -1,14 +1,16 @@
-/**
- * POST /api/ai/duplicates — AI duplicate detection
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireRole } from "@/lib/session";
 import { aiTextJson, getAiProvider } from "@/lib/ai/openaiClient";
 import { logAiRun } from "@/lib/ai/ledger";
 import { checkUserRateLimit } from "@/lib/ai/rate-limit";
 import { haversineDistance } from "@/lib/geo";
-import { DUPLICATES_SYSTEM, buildDuplicatesUser, DUPLICATES_PROMPT_VERSION } from "@/lib/ai/prompts";
+import {
+  DUPLICATES_SYSTEM,
+  buildDuplicatesUser,
+  DUPLICATES_PROMPT_VERSION,
+} from "@/lib/ai/prompts";
 import { duplicateResultSchema } from "@/lib/ai/schemas";
 import { badRequest, notFound, serverError } from "@/lib/errors";
 
@@ -18,37 +20,45 @@ export async function POST(request: NextRequest) {
 
     const rl = checkUserRateLimit(user.id);
     if (!rl.allowed) {
-      return NextResponse.json({ title: "Rate Limited", status: 429 }, { status: 429 });
+      return NextResponse.json(
+        { title: "Rate Limited", status: 429 },
+        { status: 429 },
+      );
     }
 
     const { reportId } = await request.json();
     if (!reportId) return badRequest("reportId is required");
 
-    const supabase = await getSupabaseRoute();
-    const { data: report } = await supabase.from("reports").select("*").eq("id", reportId).single();
+    const convex = getConvexClient();
+    const report = await convex.query(api.reports.getById, { id: reportId });
     if (!report) return notFound("Report not found");
 
-    const sourceCreatedAt = new Date(report.created_at);
-    const cutoff = new Date(sourceCreatedAt.getTime() - 168 * 60 * 60 * 1000).toISOString();
+    const sourceCreatedAt = new Date(report.createdAt);
+    const cutoff = new Date(
+      sourceCreatedAt.getTime() - 168 * 60 * 60 * 1000,
+    ).toISOString();
 
-    const { data: recentReports } = await supabase
-      .from("reports")
-      .select("id, type, notes, lat, lng, created_at")
-      .gte("created_at", cutoff)
-      .neq("id", reportId)
-      .neq("status", "REJECTED")
-      .limit(100);
+    const recentReports = await convex.query(api.reports.listRecentSince, {
+      since: cutoff,
+      limit: 100,
+    });
 
-    const candidates = (recentReports || [])
+    const candidates = recentReports
+      .filter((c) => c.id !== reportId && c.status !== "REJECTED")
       .filter((c) => haversineDistance(report.lat, report.lng, c.lat, c.lng) <= 500)
       .map((c) => {
-        const created = new Date(c.created_at);
+        const created = new Date(c.createdAt);
         return {
           id: c.id,
           type: c.type,
           notes: c.notes || "",
-          distanceMeters: Math.round(haversineDistance(report.lat, report.lng, c.lat, c.lng)),
-          ageHoursApart: Math.round(Math.abs(sourceCreatedAt.getTime() - created.getTime()) / 36000) / 100,
+          distanceMeters: Math.round(
+            haversineDistance(report.lat, report.lng, c.lat, c.lng),
+          ),
+          ageHoursApart:
+            Math.round(
+              Math.abs(sourceCreatedAt.getTime() - created.getTime()) / 36000,
+            ) / 100,
         };
       })
       .slice(0, 15);
@@ -77,11 +87,14 @@ export async function POST(request: NextRequest) {
     });
 
     const validIds = new Set(candidates.map((c) => c.id));
-    data.rankedCandidates = data.rankedCandidates.filter((c) => validIds.has(c.reportId));
+    data.rankedCandidates = data.rankedCandidates.filter((c) =>
+      validIds.has(c.reportId),
+    );
 
     const now = new Date().toISOString();
-    const existingAi = report.ai || {};
-    await supabase.from("reports").update({
+    const existingAi = report.ai ?? { status: "COMPLETE" as const };
+    await convex.mutation(api.reports.update, {
+      id: reportId,
       ai: {
         ...existingAi,
         duplicates: {
@@ -91,12 +104,17 @@ export async function POST(request: NextRequest) {
           createdAt: now,
         },
       },
-    }).eq("id", reportId);
+    });
 
     logAiRun({
-      action: "duplicates_manual", reportId, userId: user.id,
-      model, promptVersion: DUPLICATES_PROMPT_VERSION,
-      durationMs: Date.now() - startTime, status: "success", provider: getAiProvider(),
+      action: "duplicates_manual",
+      reportId,
+      userId: user.id,
+      model,
+      promptVersion: DUPLICATES_PROMPT_VERSION,
+      durationMs: Date.now() - startTime,
+      status: "success",
+      provider: getAiProvider(),
     }).catch(() => {});
 
     return NextResponse.json(data);

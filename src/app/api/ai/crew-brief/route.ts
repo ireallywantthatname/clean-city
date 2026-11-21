@@ -1,13 +1,15 @@
-/**
- * POST /api/ai/crew-brief — generate crew briefing
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireAnyRole } from "@/lib/session";
 import { aiTextJson, getAiProvider } from "@/lib/ai/openaiClient";
 import { logAiRun } from "@/lib/ai/ledger";
 import { checkUserRateLimit } from "@/lib/ai/rate-limit";
-import { CREW_BRIEF_SYSTEM, buildCrewBriefUser, CREW_BRIEF_PROMPT_VERSION } from "@/lib/ai/prompts";
+import {
+  CREW_BRIEF_SYSTEM,
+  buildCrewBriefUser,
+  CREW_BRIEF_PROMPT_VERSION,
+} from "@/lib/ai/prompts";
 import { crewBriefResultSchema } from "@/lib/ai/schemas";
 import { badRequest, notFound, serverError } from "@/lib/errors";
 
@@ -17,18 +19,20 @@ export async function POST(request: NextRequest) {
 
     const rl = checkUserRateLimit(user.id);
     if (!rl.allowed) {
-      return NextResponse.json({ title: "Rate Limited", status: 429 }, { status: 429 });
+      return NextResponse.json(
+        { title: "Rate Limited", status: 429 },
+        { status: 429 },
+      );
     }
 
     const { reportId } = await request.json();
     if (!reportId) return badRequest("reportId is required");
 
-    const supabase = await getSupabaseRoute();
-    const { data: report } = await supabase.from("reports").select("*").eq("id", reportId).single();
+    const convex = getConvexClient();
+    const report = await convex.query(api.reports.getById, { id: reportId });
     if (!report) return notFound("Report not found");
 
-    const aiData = (report.ai as Record<string, unknown>) || {};
-    const gd = aiData["garbageDetector"] as Record<string, unknown> | undefined;
+    const garbageTypes = report.ai?.garbageDetector?.garbageTypes;
 
     const startTime = Date.now();
     const { data, model } = await aiTextJson({
@@ -36,9 +40,9 @@ export async function POST(request: NextRequest) {
       userPrompt: buildCrewBriefUser({
         reportType: report.type,
         notes: report.notes || "",
-        priority: (report.priority as string) || "MEDIUM",
+        priority: report.priority || "MEDIUM",
         status: report.status,
-        garbageTypes: gd?.garbageTypes as string[] | undefined,
+        garbageTypes,
         hazards: undefined,
         estimatedVolume: undefined,
       }),
@@ -48,8 +52,9 @@ export async function POST(request: NextRequest) {
     });
 
     const now = new Date().toISOString();
-    const existingAi = report.ai || {};
-    await supabase.from("reports").update({
+    const existingAi = report.ai ?? { status: "COMPLETE" as const };
+    await convex.mutation(api.reports.update, {
+      id: reportId,
       ai: {
         ...existingAi,
         crewBrief: {
@@ -59,12 +64,17 @@ export async function POST(request: NextRequest) {
           createdAt: now,
         },
       },
-    }).eq("id", reportId);
+    });
 
     logAiRun({
-      action: "crew_brief_manual", reportId, userId: user.id,
-      model, promptVersion: CREW_BRIEF_PROMPT_VERSION,
-      durationMs: Date.now() - startTime, status: "success", provider: getAiProvider(),
+      action: "crew_brief_manual",
+      reportId,
+      userId: user.id,
+      model,
+      promptVersion: CREW_BRIEF_PROMPT_VERSION,
+      durationMs: Date.now() - startTime,
+      status: "success",
+      provider: getAiProvider(),
     }).catch(() => {});
 
     return NextResponse.json(data);

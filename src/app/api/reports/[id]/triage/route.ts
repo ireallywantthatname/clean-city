@@ -1,8 +1,6 @@
-/**
- * POST /api/reports/[id]/triage — set priority and triage a report
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireRole } from "@/lib/session";
 import { triageSchema, computeSlaDueAt } from "@/lib/schemas";
 import { logActivity } from "@/lib/activities";
@@ -20,37 +18,27 @@ export async function POST(
     const parsed = triageSchema.safeParse(body);
     if (!parsed.success) return badRequest(parsed.error.message);
 
-    const supabase = await getSupabaseRoute();
-
-    const { data: report, error: fetchErr } = await supabase
-      .from("reports")
-      .select("status")
-      .eq("id", id)
-      .single();
-    if (fetchErr || !report) return notFound("Report not found");
+    const convex = getConvexClient();
+    const report = await convex.query(api.reports.getById, { id });
+    if (!report) return notFound("Report not found");
 
     const now = new Date().toISOString();
-    const updates: Record<string, unknown> = {
+    const updated = await convex.mutation(api.reports.update, {
+      id,
       priority: parsed.data.priority,
-      sla_due_at: computeSlaDueAt(parsed.data.priority).toISOString(),
-    };
-
-    if (report.status === "NEW") {
-      updates.status = "TRIAGED";
-      updates.triaged_at = now;
-      updates.triaged_by_user_id = user.id;
-    }
-
-    const { error: updateErr } = await supabase
-      .from("reports")
-      .update(updates)
-      .eq("id", id);
-    if (updateErr) return serverError(updateErr.message);
+      slaDueAt: computeSlaDueAt(parsed.data.priority).toISOString(),
+      status: report.status === "NEW" ? "TRIAGED" : undefined,
+      triagedAt: report.status === "NEW" ? now : undefined,
+      triagedByUserId: report.status === "NEW" ? user.id : undefined,
+    });
+    if (!updated) return serverError("Failed to triage report");
 
     await logActivity(
-      id, "TRIAGED",
+      id,
+      "TRIAGED",
       `Triaged as ${parsed.data.priority}${body.notes ? ": " + body.notes : ""}`,
-      user.id, user.name,
+      user.id,
+      user.name,
     );
 
     return NextResponse.json({ success: true });

@@ -1,60 +1,58 @@
 # CleanCity
 
-Report overflowing bins, illegal dumping, and missed pickups — SDG 11.6.
+CleanCity is a web application for reporting overflowing bins, illegal dumping, and missed waste pickups under UN SDG 11.6. Citizens submit geotagged photo reports, operations staff triage and assign work, and field crews record completion photos and notes.
 
-Built with Next.js 16, Supabase, OpenAI-compatible AI, and OpenStreetMap.
+Built with Next.js 16, Convex, an OpenAI-compatible vision and text API, and OpenStreetMap via Leaflet.
+
+## Screenshot
+
+![CleanCity operations dashboard](public/screenshot.png)
 
 ## Setup
 
 ### Prerequisites
 
 - [Bun](https://bun.sh) runtime
-- Supabase project (configured with schema from migrations)
-- OpenAI-compatible API key (e.g. [DeepSeek](https://api-docs.deepseek.com/))
+- [Convex](https://convex.dev) account and project
+- OpenAI-compatible API key such as [DeepSeek](https://api-docs.deepseek.com/)
 
-### Environment
+### Environment variables
 
-Create `.env.local` (see values from Supabase Dashboard → Project Settings → API):
+Create `.env.local` in the project root:
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key   # optional for local; falls back to anon key
+CONVEX_DEPLOYMENT=dev:your-deployment-name
+NEXT_PUBLIC_CONVEX_URL=https://your-deployment-name.convex.cloud
+NEXT_PUBLIC_CONVEX_SITE_URL=https://your-deployment-name.convex.site
 INTERNAL_AI_SECRET=random-secret-for-internal-ai-calls
-
-# OpenAI-compatible AI — DeepSeek V4 Pro (text + vision) by default
-# https://api-docs.deepseek.com/quick_start/pricing/
-DEEPSEEK_API_KEY=sk-...               # or OPENAI_API_KEY=...
+DEEPSEEK_API_KEY=sk-...
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_MODEL=deepseek-v4-pro
 OPENAI_VISION_MODEL=deepseek-v4-pro
-AI_PROVIDER=deepseek                  # label stored in ai_runs
+AI_PROVIDER=deepseek
 ```
 
-Any OpenAI-compatible base URL works (OpenAI, DeepSeek, local vLLM, etc.).
-For cheaper text-only traffic you can set `OPENAI_MODEL=deepseek-v4-flash` while keeping Pro for vision.
+Any OpenAI-compatible base URL works. Set `OPENAI_MODEL=deepseek-v4-flash` to use a smaller model for text tasks while keeping `OPENAI_VISION_MODEL=deepseek-v4-pro` for image analysis.
 
-### Database
+### Database and backend
 
-SQL migrations live in `supabase/migrations/`. Apply them via the Supabase SQL editor, CLI, or MCP:
+Convex schema and backend functions live in `convex/`. Push the schema and functions to your development deployment:
 
-```
-001_enable_extensions → 002_create_enum_types → 003_create_profiles →
-004_create_reports → 005_create_activities → 006_create_ai_tables →
-007_create_storage_bucket → 008_seed_demo_users
+```bash
+bunx --bun convex dev --once
 ```
 
-### Install & Run
+### Install and run
 
 ```bash
 bun install
-bun run dev          # start dev server on http://localhost:3000
-bun run seed         # optional: create one staff user per role via Admin API (needs service role)
+bun run seed
+bun run dev
 ```
 
-Seed staff accounts (one per role: `ops`, `crew`) are created by migrations
-`008_seed_demo_users` / `010_ensure_seed_accounts_per_role` and by `bun run seed`.
-They are **not** shown in the login UI — use credentials from `src/lib/seed-accounts.ts` in local dev only.
+The development server listens on `http://localhost:3000`.
+
+`bun run seed` creates or updates one staff user per role in Convex using credentials from `src/lib/seed-accounts.ts`. The login page does not display these credentials.
 
 | Role | Email | Password |
 |------|-------|----------|
@@ -63,24 +61,34 @@ They are **not** shown in the login UI — use credentials from `src/lib/seed-ac
 
 ## Architecture
 
-- **Auth**: Supabase Auth (email/password) with roles in `profiles` table
-- **Database**: PostgreSQL with PostGIS, RLS policies
-- **Storage**: Supabase Storage (`report-photos` bucket)
-- **AI**: OpenAI-compatible chat API (garbage detection, triage, crew briefs, duplicates, resolution notes). Text-only providers fall back when vision is unsupported.
-- **Maps**: OpenStreetMap tiles via Leaflet (Carto dark basemap)
-- **UI**: Tailwind CSS v4, monochrome design system, DM Sans + DM Mono fonts
+- **Authentication.** Convex `users` and `sessions` tables store staff accounts and session tokens. Next.js sets an HTTP-only `cleancity_session` cookie on sign-in.
+- **Database.** Convex document tables store `reports`, `activities`, `users`, `sessions`, `ai_runs`, `ai_image_cache`, and `ai_weekly_insights` with indexed queries.
+- **Storage.** Convex file storage holds report before and after photos and generates signed URLs on read.
+- **AI pipeline.** The server calls an OpenAI-compatible chat completions endpoint to detect garbage in photos, assess triage severity, draft crew briefings, find nearby duplicate reports, and write resolution notes.
+- **Maps.** Leaflet renders OpenStreetMap tiles with a Carto dark basemap and geohash hotspot overlays.
+- **Interface.** Tailwind CSS v4 styles the monochrome layout with DM Sans and DM Mono fonts.
 
-### API Routes (26 endpoints)
+### API routes
 
 | Group | Routes |
 |-------|--------|
-| Reports | CRUD, assign, complete, triage, status, merge, duplicates, export |
-| Analytics | summary (KPI), hotspots (geohash grid) |
-| Users | list crew users |
-| AI | process-report, process-completion, garbage-check, triage, crew-brief, duplicates, public-note, status, retry-pending, weekly-insights |
+| Auth | login, logout |
+| Reports | create, list, detail, activities, assign, complete, triage, status, duplicates, merge, export |
+| Analytics | summary, hotspots |
+| Users | list staff by role |
+| AI | process-report, process-completion, garbage-check, triage, crew-brief, duplicates, public-note, status, retry-pending, run-weekly-insights |
 
-## Build
+## Build and deploy
+
+Run the local production build:
 
 ```bash
 bun run build
+```
+
+Deploy Convex functions to production and publish the Next.js worker to Cloudflare:
+
+```bash
+bunx --bun convex deploy
+bun run deploy
 ```

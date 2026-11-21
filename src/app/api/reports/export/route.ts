@@ -1,8 +1,6 @@
-/**
- * GET /api/reports/export — CSV export
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireRole } from "@/lib/session";
 import { serverError } from "@/lib/errors";
 
@@ -10,31 +8,44 @@ export async function GET(request: NextRequest) {
   try {
     await requireRole("ops");
 
-    const supabase = await getSupabaseRoute();
+    const convex = getConvexClient();
     const { searchParams } = new URL(request.url);
+    const status = searchParams.get("status") ?? undefined;
+    const type = searchParams.get("type") ?? undefined;
+    const priority = searchParams.get("priority") ?? undefined;
 
-    let query = supabase
-      .from("reports")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(5000);
+    const { reports } = await convex.query(api.reports.list, {
+      status,
+      type,
+      priority,
+      limit: 5000,
+    });
 
-    const status = searchParams.get("status");
-    const type = searchParams.get("type");
-    const priority = searchParams.get("priority");
-
-    if (status && status !== "all") query = query.eq("status", status.toUpperCase());
-    if (type && type !== "all") query = query.eq("type", type.toUpperCase());
-    if (priority && priority !== "all") query = query.eq("priority", priority.toUpperCase());
-
-    const { data: reports, error } = await query;
-    if (error) return serverError(error.message);
-
-    const headers = ["ID", "Type", "Status", "Priority", "Lat", "Lng", "Notes", "Assigned To", "Created At", "Resolved At", "SLA Due"];
-    const rows = (reports || []).map((r) => [
-      r.id, r.type, r.status, r.priority || "",
-      r.lat, r.lng, `"${(r.notes || "").replace(/"/g, '""')}"`,
-      r.assigned_to_name || "", r.created_at, r.resolved_at || "", r.sla_due_at || "",
+    const headers = [
+      "ID",
+      "Type",
+      "Status",
+      "Priority",
+      "Lat",
+      "Lng",
+      "Notes",
+      "Assigned To",
+      "Created At",
+      "Resolved At",
+      "SLA Due",
+    ];
+    const rows = reports.map((r) => [
+      r.id,
+      r.type,
+      r.status,
+      r.priority || "",
+      r.lat,
+      r.lng,
+      `"${(r.notes || "").replace(/"/g, '""')}"`,
+      r.assignedToName || "",
+      r.createdAt,
+      r.resolvedAt || "",
+      r.slaDueAt || "",
     ]);
 
     const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");

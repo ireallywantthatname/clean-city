@@ -1,8 +1,5 @@
-/**
- * AI run ledger — server-side only.
- * Every AI invocation recorded in `ai_runs` for traceability.
- */
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { getAiProvider } from "@/lib/ai/openaiClient";
 
 export interface AiRunEntry {
@@ -14,28 +11,25 @@ export interface AiRunEntry {
   durationMs: number;
   status: "success" | "error" | "timeout" | "cached";
   error?: string;
-  /** Defaults to configured AI_PROVIDER / openai */
   provider?: string;
 }
 
 export async function logAiRun(entry: AiRunEntry): Promise<string | null> {
   try {
-    const supabase = await getSupabaseRoute();
-    const { data, error } = await supabase.from("ai_runs").insert({
+    const convex = getConvexClient();
+    const id = await convex.mutation(api.ai.logRun, {
       action: entry.action,
-      report_id: entry.reportId,
-      user_id: entry.userId,
+      reportId: entry.reportId,
+      userId: entry.userId,
       model: entry.model,
-      prompt_version: entry.promptVersion,
-      duration_ms: entry.durationMs,
+      promptVersion: entry.promptVersion,
+      durationMs: entry.durationMs,
       status: entry.status,
-      error: entry.error || null,
+      error: entry.error,
       provider: entry.provider || getAiProvider(),
-      created_at: new Date().toISOString(),
-    }).select("id").single();
-
-    if (error) throw error;
-    return data.id;
+      createdAt: new Date().toISOString(),
+    });
+    return id;
   } catch (e) {
     console.error("[AI Ledger] Failed to write ai_runs:", e);
     return null;

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, DM_Mono } from "next/font/google";
+import { ConvexClientProvider } from "@/components/convex-client-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -18,8 +19,7 @@ const dmMono = DM_Mono({
 
 export const metadata: Metadata = {
   title: "CleanCity Loop",
-  description:
-    "Report overflowing bins and illegal dumping — SDG 11.6",
+  description: "Report overflowing bins and illegal dumping — SDG 11.6",
 };
 
 export default function RootLayout({
@@ -32,15 +32,17 @@ export default function RootLayout({
       <body
         className={`${dmSans.variable} ${dmMono.variable} antialiased min-h-screen bg-background font-sans`}
       >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="dark"
-          enableSystem={false}
-          disableTransitionOnChange
-        >
-          {children}
-          <Toaster position="top-right" />
-        </ThemeProvider>
+        <ConvexClientProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="dark"
+            enableSystem={false}
+            disableTransitionOnChange
+          >
+            {children}
+            <Toaster position="top-right" />
+          </ThemeProvider>
+        </ConvexClientProvider>
       </body>
     </html>
   );

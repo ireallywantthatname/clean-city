@@ -2,7 +2,6 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { resolvePostLoginPath } from "@/lib/callback-url";
 import { LogIn } from "lucide-react";
 
@@ -19,28 +18,24 @@ function LoginForm() {
     setError("");
     setLoading(true);
 
-    const supabase = getSupabaseBrowser();
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
     });
 
-    if (signInError) {
-      setError(signInError.message);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.detail || "Invalid login credentials");
       setLoading(false);
       return;
     }
 
-    // Fetch role and redirect (prefer safe callbackUrl when present)
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .single();
-
+    const data = (await res.json()) as { user?: { role?: string } };
     setLoading(false);
     const dest = resolvePostLoginPath(
       searchParams.get("callbackUrl"),
-      profile?.role,
+      data.user?.role,
     );
     router.push(dest);
     router.refresh();

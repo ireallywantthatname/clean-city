@@ -1,8 +1,5 @@
-/**
- * Activity logging helper.
- * Writes activity entries to the `activities` table.
- */
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import type { ActivityType } from "@/lib/types";
 
 export async function logActivity(
@@ -12,13 +9,13 @@ export async function logActivity(
   userId: string,
   userName: string,
 ) {
-  const supabase = await getSupabaseRoute();
-  await supabase.from("activities").insert({
-    report_id: reportId,
+  const convex = getConvexClient();
+  await convex.mutation(api.activities.log, {
+    reportId,
     type,
     message,
-    created_by: userId,
-    created_by_name: userName,
-    created_at: new Date().toISOString(),
+    createdBy: userId,
+    createdByName: userName,
+    createdAt: new Date().toISOString(),
   });
 }

@@ -1,13 +1,15 @@
-/**
- * POST /api/ai/triage — text-only AI triage (no image needed)
- */
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseRoute } from "@/lib/supabase/server";
+import { api } from "../../../../../convex/_generated/api";
+import { getConvexClient } from "@/lib/convex/server";
 import { requireRole } from "@/lib/session";
 import { aiTextJson, getAiProvider } from "@/lib/ai/openaiClient";
 import { logAiRun } from "@/lib/ai/ledger";
 import { checkUserRateLimit } from "@/lib/ai/rate-limit";
-import { TRIAGE_SYSTEM, buildTriageUser, TRIAGE_PROMPT_VERSION } from "@/lib/ai/prompts";
+import {
+  TRIAGE_SYSTEM,
+  buildTriageUser,
+  TRIAGE_PROMPT_VERSION,
+} from "@/lib/ai/prompts";
 import { aiTriageResultSchema } from "@/lib/ai/schemas";
 import { badRequest, notFound, serverError } from "@/lib/errors";
 
@@ -17,14 +19,17 @@ export async function POST(request: NextRequest) {
 
     const rl = checkUserRateLimit(user.id);
     if (!rl.allowed) {
-      return NextResponse.json({ title: "Rate Limited", status: 429 }, { status: 429 });
+      return NextResponse.json(
+        { title: "Rate Limited", status: 429 },
+        { status: 429 },
+      );
     }
 
     const { reportId } = await request.json();
     if (!reportId) return badRequest("reportId is required");
 
-    const supabase = await getSupabaseRoute();
-    const { data: report } = await supabase.from("reports").select("*").eq("id", reportId).single();
+    const convex = getConvexClient();
+    const report = await convex.query(api.reports.getById, { id: reportId });
     if (!report) return notFound("Report not found");
 
     const startTime = Date.now();
@@ -42,9 +47,10 @@ export async function POST(request: NextRequest) {
     });
 
     const now = new Date().toISOString();
-    const existingAi = report.ai || {};
+    const existingAi = report.ai ?? { status: "COMPLETE" as const };
 
-    await supabase.from("reports").update({
+    await convex.mutation(api.reports.update, {
+      id: reportId,
       ai: {
         ...existingAi,
         triage: {
@@ -55,12 +61,17 @@ export async function POST(request: NextRequest) {
           createdByUserId: user.id,
         },
       },
-    }).eq("id", reportId);
+    });
 
     logAiRun({
-      action: "triage", reportId, userId: user.id,
-      model, promptVersion: TRIAGE_PROMPT_VERSION,
-      durationMs: Date.now() - startTime, status: "success", provider: getAiProvider(),
+      action: "triage",
+      reportId,
+      userId: user.id,
+      model,
+      promptVersion: TRIAGE_PROMPT_VERSION,
+      durationMs: Date.now() - startTime,
+      status: "success",
+      provider: getAiProvider(),
     }).catch(() => {});
 
     return NextResponse.json(data);
